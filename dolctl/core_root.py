@@ -6,7 +6,13 @@ import os
 from .infra_fs import ensure_dir, find_root
 from .infra_toml import read_toml, write_toml
 from .models import Config, State, Profile, DolCtlError
-from .models import config_from_dict, config_to_dict, state_from_dict, state_to_dict, profile_to_dict
+from .models import (
+    config_from_dict,
+    config_to_dict,
+    state_from_dict,
+    state_to_dict,
+    profile_to_dict,
+)
 
 
 def resolve_root(cli_root: str | None) -> Path:

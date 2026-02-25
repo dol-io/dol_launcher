@@ -21,7 +21,13 @@ from .core_profiles import (
 from .core_root import init_root, load_config, load_state, resolve_root
 from .core_run import prepare_run
 from .core_serve import create_server
-from .core_versions import install_from_dir, install_from_file, install_from_remote, list_installed, list_remote_versions
+from .core_versions import (
+    install_from_dir,
+    install_from_file,
+    install_from_remote,
+    list_installed,
+    list_remote_versions,
+)
 from .infra_log import log_error
 from .infra_open import open_browser
 from .models import DolCtlError
@@ -70,6 +76,7 @@ def with_errors(func):
                 typer.echo(f"Error: {exc}", err=True)
                 raise typer.Exit(code=1)
             _handle_error(ctx, exc)
+
     wrapper.__signature__ = inspect.signature(func)
     return wrapper
 
@@ -158,10 +165,14 @@ def version_remote_list(
 @with_errors
 def install(
     ctx: typer.Context,
-    selector: Optional[str] = typer.Argument(None, help="Version selector (e.g., latest, 0.5.3)"),
+    selector: Optional[str] = typer.Argument(
+        None, help="Version selector (e.g., latest, 0.5.3)"
+    ),
     channel: str = typer.Option("vanilla", "--channel"),
     file: Optional[Path] = typer.Option(None, "--file", help="Install from zip"),
-    source_dir: Optional[Path] = typer.Option(None, "--dir", help="Install from directory"),
+    source_dir: Optional[Path] = typer.Option(
+        None, "--dir", help="Install from directory"
+    ),
     version_id: Optional[str] = typer.Option(None, "--as", help="Override version id"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
