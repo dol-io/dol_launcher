@@ -50,7 +50,7 @@ class Mod:
     version: str
     author: str
     description: str
-    source: str          # "local" | "url"
+    source: str  # "local" | "url"
     source_ref: str
     installed_at: str
     path: Path

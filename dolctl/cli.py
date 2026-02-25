@@ -256,6 +256,7 @@ def profile_set_version(
 # mod commands:  dolctl mod list / add / remove / info
 # ---------------------------------------------------------------------------
 
+
 @mod_app.command("list")
 @with_errors
 def mod_list(ctx: typer.Context) -> None:
@@ -313,6 +314,7 @@ def mod_info(
 # profile mod commands:  dolctl profile mod add / remove / list
 # ---------------------------------------------------------------------------
 
+
 @profile_mod_app.command("add")
 @with_errors
 def profile_mod_add(
@@ -358,6 +360,7 @@ def profile_mod_list(
 # ---------------------------------------------------------------------------
 # build / run / serve
 # ---------------------------------------------------------------------------
+
 
 @app.command()
 @with_errors

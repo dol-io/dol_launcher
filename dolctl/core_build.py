@@ -37,7 +37,7 @@ def _build_inject_script(mod_paths: list[str]) -> str:
     paths_js = ", ".join(f'"{ p}"' for p in mod_paths)
     return (
         f"{_INJECT_MARKER_START}\n"
-        "<script type=\"text/javascript\">\n"
+        '<script type="text/javascript">\n'
         "(function () {\n"
         "  window.modList = window.modList || [];\n"
         + "".join(f'  window.modList.push("{p}");\n' for p in mod_paths)

@@ -4,6 +4,7 @@ Mod management module.
 Mods are stored as ModLoader-compatible .mod.zip files under mods/<mod_id>/.
 Each mod zip must contain a boot.json at the root level (DoL ModLoader format).
 """
+
 from __future__ import annotations
 
 import json
@@ -36,7 +37,9 @@ def _read_boot_json(zip_path: Path) -> dict | None:
         with zipfile.ZipFile(zip_path, "r") as zf:
             names = zf.namelist()
             # Support boot.json at root or inside a single top-level directory
-            candidates = [n for n in names if n == "boot.json" or n.endswith("/boot.json")]
+            candidates = [
+                n for n in names if n == "boot.json" or n.endswith("/boot.json")
+            ]
             if not candidates:
                 return None
             # Prefer root-level boot.json
@@ -99,6 +102,7 @@ def add_mod_from_zip(
         description = ""
         # Warn but don't block — user may import non-standard zips
         import warnings
+
         warnings.warn(
             f"No boot.json found in {zip_path.name}. "
             "This may not be a valid DoL ModLoader mod.",
