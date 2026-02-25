@@ -3,7 +3,13 @@
 This repository currently contains the product specification in `requirement.md`. Treat it as the source of truth for behavior, acceptance checks, and module boundaries; update it if you intentionally diverge.
 
 ## Project Structure & Module Organization
-Expected layout (from the spec) is a Python package `dolctl/` with `cli.py`, `models.py`, `core_*.py`, `infra_*.py`, and `providers_*.py`. Keep the CLI thin; business logic lives in `core_*`, helpers in `infra_*`, and remote index logic in `providers_*`. Runtime data must live under a user-selected ROOT (e.g., `~/Games/DoL/`) with `.dolctl/`, `versions/`, `mods/`, `profiles/`, and `runtime/` subfolders.
+Expected layout:
+- `dolctl/` — Python package containing **only** CLI entry points (`cli.py`, `__init__.py`)
+- `core/` — top-level package: business logic (`build.py`, `mods.py`, `models.py`, `profiles.py`, `root.py`, `run.py`, `serve.py`, `versions.py`)
+- `infra/` — top-level package: infrastructure helpers (`fs.py`, `log.py`, `net.py`, `open.py`, `toml.py`, `zip.py`)
+- `providers/` — top-level package: remote index implementations (`github.py`)
+
+Keep `dolctl/` thin (CLI only). Business logic lives in `core/`, helpers in `infra/`, remote index logic in `providers/`. Cross-package imports are absolute (`from core.models import …`, `from infra.fs import …`). Intra-package imports stay relative (`from .root import …`). Runtime data must live under a user-selected ROOT (e.g., `~/Games/DoL/`) with `.dolctl/`, `versions/`, `mods/`, `profiles/`, and `runtime/` subfolders.
 
 ## Build, Test, and Development Commands
 Use Python 3.11 with `uv` (see `pyproject.toml`). Typical commands:

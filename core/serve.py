@@ -4,8 +4,8 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .infra_net import find_available_port, is_port_available
-from .models import DolCtlError
+from infra.net import find_available_port, is_port_available
+from core.models import DolCtlError
 
 
 class QuietHandler(SimpleHTTPRequestHandler):

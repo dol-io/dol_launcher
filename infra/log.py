@@ -4,7 +4,7 @@ from pathlib import Path
 import traceback
 from datetime import datetime, timezone
 
-from .infra_fs import ensure_dir
+from .fs import ensure_dir
 
 
 def log_error(root: Path, message: str, exc: Exception | None = None) -> None:

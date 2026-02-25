@@ -459,33 +459,42 @@ last_used_version = "vanilla-0.5.3"
 - `providers`：远端索引与下载实现（GitHub 等）
 - `infra`：文件系统、下载、解压、hash、浏览器打开等工具
 
-### 8.2 简化项目结构（要求）
+### 8.2 项目结构（要求）
 项目必须保持少量文件与清晰模块边界。推荐：
 ```
-dolctl/
+dol_launcher/          # 仓库根目录
   pyproject.toml
-  dolctl/
+  dolctl/              # 仅 CLI 入口
     __init__.py
-    cli.py
-    core_root.py
-    core_versions.py
-    core_mods.py
-    core_profiles.py
-    core_build.py
-    core_serve.py
-    core_run.py
-    providers_github.py
-    infra_fs.py
-    infra_net.py
-    infra_zip.py
-    infra_open.py
-    models.py
+    cli.py             # CLI 命令（thin，仅解析参数与打印输出）
+  core/                # 业务逻辑（顶层包）
+    __init__.py
+    models.py          # 共享数据类与序列化
+    root.py            # Root & Config
+    versions.py        # 版本安装与管理
+    mods.py            # Mod 管理
+    profiles.py        # Profile 管理
+    build.py           # 构建（ModLoader 注入）
+    serve.py           # HTTP 服务
+    run.py             # 运行编排
+  infra/               # 基础设施工具（顶层包）
+    __init__.py
+    fs.py              # 文件系统工具
+    net.py             # 网络下载
+    zip.py             # 解压
+    toml.py            # TOML 读写
+    log.py             # 日志
+    open.py            # 浏览器打开
+  providers/           # 远端索引（顶层包）
+    __init__.py
+    github.py          # GitHub Releases 索引
 ```
+跨包引用使用绝对导入（`from core.models import …`、`from infra.fs import …`）；同包内部使用相对导入（`from .root import …`）。
 
 ### 8.3 模块依赖方向（强约束）
-- `core_*` 可以依赖 `infra_*` 和 `models`
-- `providers_*` 可以依赖 `infra_*` 和 `models`
-- `cli.py` 只能依赖 `core_*` / `models`
+- `core/*` 可以依赖 `infra/*` 和 `core/models`
+- `providers/*` 可以依赖 `infra/*` 和 `core/models`
+- `dolctl/cli.py` 只能依赖 `core/*`（通过绝对导入）
 - 任何模块不得直接跨层写别的模块的内部文件；统一通过 core 的接口完成
 
 ---

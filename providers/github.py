@@ -4,8 +4,8 @@ import os
 import re
 from typing import Any
 
-from .infra_net import fetch_json
-from .models import RemoteVersion
+from infra.net import fetch_json
+from core.models import RemoteVersion
 
 
 class GitHubReleasesProvider:

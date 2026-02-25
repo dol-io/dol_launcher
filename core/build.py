@@ -6,9 +6,9 @@ import json
 import os
 import shutil
 
-from .core_profiles import get_profile
-from .infra_fs import ensure_dir, safe_rmtree, now_iso
-from .models import BuildResult, DolCtlError
+from .profiles import get_profile
+from infra.fs import ensure_dir, safe_rmtree, now_iso
+from core.models import BuildResult, DolCtlError
 
 
 IGNORED_FILES = {".manifest.toml"}

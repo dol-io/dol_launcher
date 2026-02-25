@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 import os
 
-from .infra_fs import ensure_dir, find_root
-from .infra_toml import read_toml, write_toml
-from .models import Config, State, Profile, DolCtlError
-from .models import (
+from infra.fs import ensure_dir, find_root
+from infra.toml import read_toml, write_toml
+from core.models import Config, State, Profile, DolCtlError
+from core.models import (
     config_from_dict,
     config_to_dict,
     state_from_dict,

@@ -10,14 +10,14 @@ import click
 import typer
 
 from . import __version__
-from .core_build import build_runtime
-from .core_mods import (
+from core.build import build_runtime
+from core.mods import (
     add_mod_from_zip,
     get_mod_info,
     list_mods,
     remove_mod,
 )
-from .core_profiles import (
+from core.profiles import (
     add_mod_to_profile,
     create_profile,
     get_profile,
@@ -26,19 +26,19 @@ from .core_profiles import (
     set_active_profile,
     set_profile_version,
 )
-from .core_root import init_root, load_config, load_state, resolve_root
-from .core_run import prepare_run
-from .core_serve import create_server
-from .core_versions import (
+from core.root import init_root, load_config, load_state, resolve_root
+from core.run import prepare_run
+from core.serve import create_server
+from core.versions import (
     install_from_dir,
     install_from_file,
     install_from_remote,
     list_installed,
     list_remote_versions,
 )
-from .infra_log import log_error
-from .infra_open import open_browser
-from .models import DolCtlError
+from infra.log import log_error
+from infra.open import open_browser
+from core.models import DolCtlError
 
 app = typer.Typer(add_completion=False)
 version_app = typer.Typer()

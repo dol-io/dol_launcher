@@ -6,12 +6,12 @@ import shutil
 import tempfile
 from datetime import datetime, timezone
 
-from .core_root import load_config
-from .infra_fs import ensure_dir, safe_rmtree, atomic_dir_move, now_iso, calc_sha256
-from .infra_toml import read_toml, write_toml
-from .infra_zip import extract_zip
-from .infra_net import download_file
-from .models import (
+from .root import load_config
+from infra.fs import ensure_dir, safe_rmtree, atomic_dir_move, now_iso, calc_sha256
+from infra.toml import read_toml, write_toml
+from infra.zip import extract_zip
+from infra.net import download_file
+from core.models import (
     DolCtlError,
     VersionManifest,
     InstalledVersion,
@@ -21,7 +21,7 @@ from .models import (
     remote_version_from_dict,
     remote_version_to_dict,
 )
-from .providers_github import GitHubReleasesProvider
+from providers.github import GitHubReleasesProvider
 
 
 def _versions_dir(root: Path) -> Path:

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .infra_fs import ensure_dir
-from .infra_toml import read_toml, write_toml
-from .models import Profile, DolCtlError
-from .models import profile_from_dict, profile_to_dict
-from .core_root import load_state, save_state
+from infra.fs import ensure_dir
+from infra.toml import read_toml, write_toml
+from core.models import Profile, DolCtlError
+from core.models import profile_from_dict, profile_to_dict
+from .root import load_state, save_state
 
 
 def _profile_dir(root: Path, name: str) -> Path:
