@@ -1,0 +1,28 @@
+[project]
+name = "dolctl"
+version = "0.1.0"
+description = "DoL launcher CLI"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.12.0",
+  "httpx>=0.27.0",
+  "tomli-w>=1.0.0",
+]
+
+[project.scripts]
+dolctl = "dolctl.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dolctl*"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.4.0",
+  "mypy>=1.8.0",
+]

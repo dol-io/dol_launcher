@@ -1,0 +1,43 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# uv
+.uv/
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime data
+.dolctl/
+versions/
+mods/
+profiles/
+runtime/
+*.log
+
+# Keep spec docs
+!AGENTS.md
+!requirement.md
