@@ -38,6 +38,7 @@ def init_root(root: Path) -> None:
     ensure_dir(dolctl_dir / "logs")
 
     ensure_dir(root / "versions")
+    ensure_dir(root / "mods")
     ensure_dir(root / "profiles" / "default")
     ensure_dir(root / "runtime")
 

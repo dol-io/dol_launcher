@@ -11,10 +11,18 @@ import typer
 
 from . import __version__
 from .core_build import build_runtime
+from .core_mods import (
+    add_mod_from_zip,
+    get_mod_info,
+    list_mods,
+    remove_mod,
+)
 from .core_profiles import (
+    add_mod_to_profile,
     create_profile,
     get_profile,
     list_profiles,
+    remove_mod_from_profile,
     set_active_profile,
     set_profile_version,
 )
@@ -36,6 +44,8 @@ app = typer.Typer(add_completion=False)
 version_app = typer.Typer()
 version_remote_app = typer.Typer()
 profile_app = typer.Typer()
+profile_mod_app = typer.Typer()
+mod_app = typer.Typer()
 
 
 def _get_root(ctx: typer.Context) -> Path:
@@ -242,6 +252,113 @@ def profile_set_version(
     typer.echo(f"Profile {profile_name} now uses {version_id}")
 
 
+# ---------------------------------------------------------------------------
+# mod commands:  dolctl mod list / add / remove / info
+# ---------------------------------------------------------------------------
+
+@mod_app.command("list")
+@with_errors
+def mod_list(ctx: typer.Context) -> None:
+    root = _get_root(ctx)
+    mods = list_mods(root)
+    if not mods:
+        typer.echo("No mods installed")
+        return
+    for m in mods:
+        typer.echo(f"{m.id}\t{m.name}\t{m.version}")
+
+
+@mod_app.command("add")
+@with_errors
+def mod_add(
+    ctx: typer.Context,
+    path_or_url: str = typer.Argument(..., help="Path to .mod.zip or a URL"),
+    mod_id: Optional[str] = typer.Option(None, "--id", help="Override mod id"),
+) -> None:
+    root = _get_root(ctx)
+    installed_id = add_mod_from_zip(root, path_or_url, mod_id)
+    typer.echo(f"Installed mod: {installed_id}")
+
+
+@mod_app.command("remove")
+@with_errors
+def mod_remove(
+    ctx: typer.Context,
+    mod_id: str = typer.Argument(...),
+) -> None:
+    root = _get_root(ctx)
+    remove_mod(root, mod_id)
+    typer.echo(f"Removed mod: {mod_id}")
+
+
+@mod_app.command("info")
+@with_errors
+def mod_info(
+    ctx: typer.Context,
+    mod_id: str = typer.Argument(...),
+) -> None:
+    root = _get_root(ctx)
+    m = get_mod_info(root, mod_id)
+    typer.echo(f"id:          {m.id}")
+    typer.echo(f"name:        {m.name}")
+    typer.echo(f"version:     {m.version}")
+    typer.echo(f"author:      {m.author}")
+    typer.echo(f"description: {m.description}")
+    typer.echo(f"source:      {m.source}")
+    typer.echo(f"source_ref:  {m.source_ref}")
+    typer.echo(f"installed:   {m.installed_at}")
+
+
+# ---------------------------------------------------------------------------
+# profile mod commands:  dolctl profile mod add / remove / list
+# ---------------------------------------------------------------------------
+
+@profile_mod_app.command("add")
+@with_errors
+def profile_mod_add(
+    ctx: typer.Context,
+    mod_id: str = typer.Argument(...),
+    profile: Optional[str] = typer.Option(None, "--profile"),
+) -> None:
+    root = _get_root(ctx)
+    profile_name = _resolve_profile_name(root, profile)
+    add_mod_to_profile(root, profile_name, mod_id)
+    typer.echo(f"Added {mod_id} to profile {profile_name}")
+
+
+@profile_mod_app.command("remove")
+@with_errors
+def profile_mod_remove(
+    ctx: typer.Context,
+    mod_id: str = typer.Argument(...),
+    profile: Optional[str] = typer.Option(None, "--profile"),
+) -> None:
+    root = _get_root(ctx)
+    profile_name = _resolve_profile_name(root, profile)
+    remove_mod_from_profile(root, profile_name, mod_id)
+    typer.echo(f"Removed {mod_id} from profile {profile_name}")
+
+
+@profile_mod_app.command("list")
+@with_errors
+def profile_mod_list(
+    ctx: typer.Context,
+    profile: Optional[str] = typer.Option(None, "--profile"),
+) -> None:
+    root = _get_root(ctx)
+    profile_name = _resolve_profile_name(root, profile)
+    p = get_profile(root, profile_name)
+    if not p.mod_order:
+        typer.echo("No mods in profile")
+        return
+    for i, mod_id in enumerate(p.mod_order, 1):
+        typer.echo(f"{i}. {mod_id}")
+
+
+# ---------------------------------------------------------------------------
+# build / run / serve
+# ---------------------------------------------------------------------------
+
 @app.command()
 @with_errors
 def build(
@@ -319,3 +436,5 @@ def serve(
 app.add_typer(version_app, name="version")
 version_app.add_typer(version_remote_app, name="remote")
 app.add_typer(profile_app, name="profile")
+profile_app.add_typer(profile_mod_app, name="mod")
+app.add_typer(mod_app, name="mod")

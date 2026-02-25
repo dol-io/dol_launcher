@@ -23,7 +23,7 @@
   - 支持构建时冲突报告（哪个文件被覆盖）
 
 ### 1.2 非目标（本期不做）
-- 不实现游戏内部的 ModLoader 注入逻辑（启动器仅做文件层管理/部署）。
+- ~~不实现游戏内部的 ModLoader 注入逻辑~~ → **已纳入范围**（见第 4.2、5.4、5.6 节）。
 - 不实现存档 DAG / git-save（可预留接口）。
 - 不实现复杂的 Mod 依赖解析（可预留 manifest 字段）。
 - 不实现跨设备同步/云端存档。
@@ -74,7 +74,7 @@
       .manifest.toml
   mods/
     <mod_id>/
-      ... (mod 文件)
+      <mod_id>.mod.zip    # ModLoader 格式 zip，内含 boot.json
       .mod.toml
   profiles/
     default/
@@ -113,22 +113,42 @@ entry = "index.html"               # 入口相对路径（默认 index.html）
 ```
 
 ### 4.2 Mod
-- Mod 是一个文件树，会在 build 阶段覆盖到 base version 上
-- Mod 以 `mod_id` 作为目录名（可由用户指定或从文件名推断）
+
+> **参考实现**：Mod 系统架构参照 [DoL-Lyra/Lyra](https://github.com/DoL-Lyra/Lyra)（MIT License, Copyright (c) 2024 Sakari）的 ModLoader 注入方式设计，而非简单文件覆盖。
+
+- Mod 是符合 DoL **ModLoader** 格式的 `.mod.zip` 文件，内含 `boot.json` 描述文件
+- Mod 以 `mod_id` 作为目录名存放在 `mods/<mod_id>/`，核心文件为 `<mod_id>.mod.zip`
+- Build 阶段不做文件树覆盖，而是将启用的 mod zip 路径注入到 `index.html` 的 ModLoader 加载列表中（仿照 Lyra 的 `ModInjector`）
+- Mod 加载顺序由 profile 中的 `mod_order` 决定，顺序即 ModLoader 加载顺序
 
 #### 4.2.1 mod manifest（必须）
 位置：`mods/<mod_id>/.mod.toml`
 字段：
 ```toml
 id = "my_mod"
-name = "My Mod"
-version = "1.0.0"
+name = "My Mod"                    # 从 boot.json 读取或用户指定
+version = "1.0.0"                  # 从 boot.json 读取
 author = ""
 description = ""
-priority = 50                      # 越大越后覆盖；profile 允许覆盖顺序
 source = "local"                   # "local" | "url"
-source_ref = "..."
+source_ref = "..."                 # 来源 URL 或本地路径
 installed_at = "..."
+```
+
+#### 4.2.2 ModLoader boot.json 结构（参考）
+mod zip 内的 `boot.json` 由 DoL ModLoader 读取，字段示例：
+```json
+{
+  "name": "MyMod",
+  "version": "1.0.0",
+  "scriptFileList_inject_early": [],
+  "scriptFileList_earlyload": [],
+  "scriptFileList_preload": [],
+  "styleFileList": [],
+  "scriptFileList": [],
+  "tweeFileList": [],
+  "imgFileList": []
+}
 ```
 
 ### 4.3 Profile
@@ -141,10 +161,9 @@ installed_at = "..."
 ```toml
 name = "default"
 version_id = "vanilla-0.5.3"
-mods = ["modA", "modB"]
 
-# 可选：明确顺序，若存在则覆盖 priority 排序
-mod_order = ["modB", "modA"]
+# mod 加载列表，即 ModLoader 注入顺序（前→后）
+mod_order = ["modA", "modB"]
 
 # 可选：端口/浏览器覆盖
 port = 8799
@@ -243,38 +262,44 @@ asset_regex = ".*\\.zip$"
 ---
 
 ### 5.4 Mod 管理模块
+
+> 参照 Lyra 的 `warmup.py` / `prepare.py` 中对 ModLoader mod 的管理方式设计。
+
 **职责**
-- 导入 mod（dir/zip/url）到 `mods/<mod_id>/`
+- 导入 mod zip（本地路径 / URL）到 `mods/<mod_id>/`，核心文件为 `<mod_id>.mod.zip`
+- 解析 mod zip 内的 `boot.json` 提取名称、版本等元信息
 - 读取/写入 `.mod.toml`
 - 列出/删除 mod
 
 **接口**
-- `add_mod_from_dir(root, path, mod_id | None) -> mod_id`
 - `add_mod_from_zip(root, path_or_url, mod_id | None) -> mod_id`
 - `list_mods(root) -> list[Mod]`
 - `remove_mod(root, mod_id) -> None`
+- `get_mod_info(root, mod_id) -> Mod`
 
 **约束**
-- 导入 zip 时：
-  - 若 zip 内有顶层单目录，允许剥掉一层（常见 mod 打包方式）
-- 不需要理解 mod 内容，仅作为文件树处理
+- 导入的 zip 必须是有效的 ModLoader mod（根目录含 `boot.json`）；若无则警告但仍可导入
+- mod zip 以 `<mod_id>.mod.zip` 命名存放，路径：`mods/<mod_id>/<mod_id>.mod.zip`
+- 不修改 mod zip 内容，仅做存储与元信息管理
 
 **验收**
-- `dolctl mod add` 后在 `mods/<id>/` 能看到内容与 `.mod.toml`
+- `dolctl mod add` 后在 `mods/<id>/` 能看到 `.mod.zip` 与 `.mod.toml`
+- `.mod.toml` 中 name/version 从 `boot.json` 自动填充
 
 ---
 
 ### 5.5 Profile 模块
 **职责**
 - 创建/删除/切换 profile
-- 对 profile 启用/禁用 mod
+- 管理 profile 的 mod 列表与加载顺序
 - 设置 profile 的 `version_id`
 
 **接口**
 - `create_profile(root, name) -> None`
 - `set_profile_version(root, profile, version_id) -> None`
-- `enable_mod(root, profile, mod_id) -> None`
-- `disable_mod(root, profile, mod_id) -> None`
+- `add_mod_to_profile(root, profile, mod_id) -> None`
+- `remove_mod_from_profile(root, profile, mod_id) -> None`
+- `reorder_mods(root, profile, ordered_mod_ids) -> None`
 - `get_profile(root, profile) -> Profile`
 - `list_profiles(root) -> list[str]`
 
@@ -284,28 +309,38 @@ asset_regex = ".*\\.zip$"
 
 ---
 
-### 5.6 Build（合并构建）模块
-**职责**
-- 将 `versions/<version_id>/` 作为 base
-- 按 profile 启用的 mod 顺序叠加覆盖，输出到 `runtime/<profile>/merged/`
-- 生成构建元信息（冲突、文件覆盖来源、时间戳）
+### 5.6 Build（构建）模块
 
-**合并策略（MVP）**
-- copy-overlay：依次复制文件树，后者覆盖前者
-- 冲突定义：同一路径文件被多个来源写入
-- 输出 `build_meta.json`：
-  - base version id
-  - mod 列表与顺序
-  - 覆盖冲突列表（path -> last_writer, overwritten_by）
-  - 构建时间
-  - 可选：hash 指纹（用于增量构建，后续实现）
+> 参照 Lyra 的 `build.py`（`ZipBuilder`）与 `prepare.py`（`ModInjector`）实现。
+
+**职责**
+- 将 `versions/<version_id>/` 复制到 `runtime/<profile>/merged/`（base 拷贝）
+- 将 profile 中启用的 mod zip 路径**注入到 `index.html`**，由 ModLoader 在运行时按顺序加载
+- 生成构建元信息
+
+**ModLoader 注入策略（核心）**
+仿照 Lyra `ModInjector.add_mods()`：在 `index.html` 的 `<head>` 中插入一段引导脚本，将各 mod zip 的相对路径写入 `window.modList`（或 ModLoader 识别的等效接口），使 ModLoader 在游戏启动时自动加载。
+
+具体流程：
+1. 复制 base version 文件树到 `merged/`（忽略 `.manifest.toml`）
+2. 将已启用 mod zip 复制到 `merged/mods/`
+3. 修改 `merged/index.html`，在 `<head>` 的 ModLoader `<script>` 标签前插入 mod 路径列表注入脚本
+4. 写入 `build_meta.json`
+
+**输出 `build_meta.json`**：
+- base version id
+- mod 列表与加载顺序
+- 构建时间
+- 可选：各文件 hash 指纹（用于增量构建，后续实现）
 
 **接口**
 - `build_runtime(root, profile_name, clean=True) -> BuildResult`
 
 **验收**
 - merged 目录存在且 `index.html` 可访问
-- `build_meta.json` 存在且包含冲突信息
+- `index.html` 中含有 mod 注入脚本（若有启用 mod）
+- mod zip 文件存在于 `merged/mods/`
+- `build_meta.json` 存在
 
 ---
 
@@ -367,7 +402,7 @@ Selector 规则（remote install）：
 
 ### 6.3 Mod 命令
 - `dolctl mod list`
-- `dolctl mod add <path_or_zip_or_url> [--id <mod_id>]`
+- `dolctl mod add <path_or_url> [--id <mod_id>]`（接受 `.mod.zip`）
 - `dolctl mod remove <mod_id>`
 - `dolctl mod info <mod_id>`
 
@@ -376,11 +411,12 @@ Selector 规则（remote install）：
 - `dolctl profile create <name>`
 - `dolctl profile use <name>`
 - `dolctl profile set-version <version_id> [--profile <name>]`
-- `dolctl profile mod enable <mod_id> [--profile <name>]`
-- `dolctl profile mod disable <mod_id> [--profile <name>]`
+- `dolctl profile mod add <mod_id> [--profile <name>]`
+- `dolctl profile mod remove <mod_id> [--profile <name>]`
+- `dolctl profile mod list [--profile <name>]`
 
 ### 6.5 构建与运行
-- `dolctl build [--profile <name>] [--report-conflicts]`
+- `dolctl build [--profile <name>]`
 - `dolctl run [--profile <name>] [--port <p>] [--no-browser]`
 - `dolctl serve [--profile <name>] [--port <p>]`（仅服务已构建目录，可选）
 
@@ -486,9 +522,9 @@ dolctl/
 - `dolctl use vanilla-0.5.3` 修改 default profile 的 version_id
 
 ### 10.3 Mod 管理与构建
-- `dolctl mod add some_mod.zip --id modA`
-- `dolctl profile mod enable modA`
-- `dolctl build --report-conflicts` 生成 merged 与 build_meta.json
+- `dolctl mod add some_mod.zip --id modA`（mod zip 含有效 `boot.json`）
+- `dolctl profile mod add modA` 将 modA 加入当前 profile 的加载列表
+- `dolctl build` 生成 merged，`index.html` 内含 mod 注入脚本，`mods/modA.mod.zip` 存在
 
 ### 10.4 一键运行
 - `dolctl run` 默认端口 8799
@@ -503,7 +539,43 @@ dolctl/
 
 ---
 
-## 11. 未来扩展点（预留，不实现）
+## 11. 参考实现说明
+
+### 11.1 Lyra 参考
+
+Mod 系统的设计与实现参照 [DoL-Lyra/Lyra](https://github.com/DoL-Lyra/Lyra)（MIT License, Copyright (c) 2024 Sakari），以下模块在设计上有直接对应关系：
+
+| dolctl 模块 | Lyra 参考模块 | 说明 |
+|---|---|---|
+| `core_mods.py` | `lyra/warmup.py` | mod zip 的本地存储与元数据管理 |
+| `core_build.py`（注入部分） | `lyra/prepare.py` (`ModInjector`) | 向 `index.html` 注入 ModLoader mod 列表 |
+| `core_build.py`（复制部分） | `lyra/build.py` (`ZipBuilder`) | base 版本文件树复制 |
+| `models.py` (`Mod`) | `lyra/config_loader.py` (`ModloaderModConfig`) | mod 元信息结构 |
+
+**与 Lyra 的主要差异**：
+- dolctl 是本地单机启动器，不做并行构建、APK 打包、CI 矩阵
+- dolctl 的 mod 由用户手动管理（任意 `.mod.zip`），Lyra 的 mod 集合固定由配置文件驱动
+- dolctl 的 profile 允许不同 mod 组合，Lyra 枚举所有位标志组合批量构建
+
+### 11.2 ModLoader 注入机制说明
+
+DoL 的 ModLoader 通过修改 `index.html` 加载外部 mod。注入方式参照 Lyra `ModInjector`：
+
+```python
+# 伪代码：在 index.html 的 <head> 内插入
+<script>
+window.modList = [
+  "mods/modA.mod.zip",
+  "mods/modB.mod.zip"
+];
+</script>
+```
+
+Mod zip 内必须含 `boot.json`，ModLoader 据此识别加载内容。
+
+---
+
+## 12. 未来扩展点（预留，不实现）
 - overlayfs/增量构建（减少复制）
 - mod 依赖/冲突规则（manifest schema 扩展）
 - 多实例运行（不同 profile 不同端口）

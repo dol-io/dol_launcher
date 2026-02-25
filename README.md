@@ -104,3 +104,10 @@ dolctl serve --port 8799                    # 仅启动已构建的服务 / Serv
 ## 许可 / License
 
 见 [LICENSE](LICENSE)。 / See [LICENSE](LICENSE).
+
+## 致谢 / Credits
+
+Mod 管理与构建逻辑参考了 [DoL-Lyra/Lyra](https://github.com/DoL-Lyra/Lyra) 的架构设计与部分实现思路，包括 ModLoader 注入方式、mod 组合管理模式等。该项目基于 MIT 协议开源（Copyright (c) 2024 Sakari）。
+
+The mod management and build logic is inspired by and partially adapted from [DoL-Lyra/Lyra](https://github.com/DoL-Lyra/Lyra), including its ModLoader injection approach and mod combination management patterns. Lyra is MIT-licensed (Copyright (c) 2024 Sakari).
+Summarized

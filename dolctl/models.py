@@ -44,9 +44,23 @@ class VersionManifest:
 
 
 @dataclass
+class Mod:
+    id: str
+    name: str
+    version: str
+    author: str
+    description: str
+    source: str          # "local" | "url"
+    source_ref: str
+    installed_at: str
+    path: Path
+
+
+@dataclass
 class Profile:
     name: str
     version_id: str = ""
+    mod_order: list[str] = field(default_factory=list)
     port: int | None = None
     open_browser: bool | None = None
 
@@ -148,6 +162,7 @@ def profile_from_dict(data: dict[str, Any]) -> Profile:
     return Profile(
         name=str(data.get("name", "default")),
         version_id=str(data.get("version_id", "")),
+        mod_order=list(data.get("mod_order") or []),
         port=data.get("port"),
         open_browser=data.get("open_browser"),
     )
@@ -157,12 +172,40 @@ def profile_to_dict(profile: Profile) -> dict[str, Any]:
     data: dict[str, Any] = {
         "name": profile.name,
         "version_id": profile.version_id,
+        "mod_order": profile.mod_order,
     }
     if profile.port is not None:
         data["port"] = profile.port
     if profile.open_browser is not None:
         data["open_browser"] = profile.open_browser
     return data
+
+
+def mod_from_dict(data: dict[str, Any], path: Path) -> "Mod":
+    return Mod(
+        id=str(data.get("id", "")),
+        name=str(data.get("name", "")),
+        version=str(data.get("version", "")),
+        author=str(data.get("author", "")),
+        description=str(data.get("description", "")),
+        source=str(data.get("source", "local")),
+        source_ref=str(data.get("source_ref", "")),
+        installed_at=str(data.get("installed_at", "")),
+        path=path,
+    )
+
+
+def mod_to_dict(mod: "Mod") -> dict[str, Any]:
+    return {
+        "id": mod.id,
+        "name": mod.name,
+        "version": mod.version,
+        "author": mod.author,
+        "description": mod.description,
+        "source": mod.source,
+        "source_ref": mod.source_ref,
+        "installed_at": mod.installed_at,
+    }
 
 
 def version_manifest_to_dict(manifest: VersionManifest) -> dict[str, Any]:
