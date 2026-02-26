@@ -33,7 +33,11 @@ def _find_entry_html(directory: Path) -> str:
     """
     if (directory / "index.html").exists():
         return "index.html"
-    html_files = sorted(f.name for f in directory.iterdir() if f.is_file() and f.suffix.lower() == ".html")
+    html_files = sorted(
+        f.name
+        for f in directory.iterdir()
+        if f.is_file() and f.suffix.lower() == ".html"
+    )
     if html_files:
         return html_files[0]
     raise DolCtlError(
@@ -135,7 +139,9 @@ def _get_provider(root: Path, channel: str) -> GitHubReleasesProvider:
     return GitHubReleasesProvider(channel, channel_cfg.repo, channel_cfg.asset_regex)
 
 
-def list_remote_versions(root: Path, channel: str, refresh: bool = False) -> list[RemoteVersion]:
+def list_remote_versions(
+    root: Path, channel: str, refresh: bool = False
+) -> list[RemoteVersion]:
     config = load_config(root)
     cache_path = _cache_dir(root) / f"{channel}.json"
     if not refresh and _cache_valid(cache_path, config.index_cache_ttl_seconds):
@@ -152,7 +158,9 @@ def _normalize_id(value: str) -> str:
     return value
 
 
-def _select_remote_version(versions: list[RemoteVersion], selector: str) -> RemoteVersion:
+def _select_remote_version(
+    versions: list[RemoteVersion], selector: str
+) -> RemoteVersion:
     if selector == "latest":
         ordered = sorted(versions, key=lambda v: v.published_at, reverse=True)
         if not ordered:
@@ -179,7 +187,9 @@ def _make_version_id(channel: str, remote_id: str) -> str:
     return f"{channel}-{remote_id}"
 
 
-def _install_from_temp(root: Path, temp_dir: Path, version_id: str, manifest: VersionManifest, force: bool) -> None:
+def _install_from_temp(
+    root: Path, temp_dir: Path, version_id: str, manifest: VersionManifest, force: bool
+) -> None:
     dest = _versions_dir(root) / version_id
     if dest.exists():
         if not force:

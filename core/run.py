@@ -45,7 +45,7 @@ def prepare_run(
         open_browser = open_browser_override
 
     # Determine the entry HTML filename from the version manifest
-    manifest_path = (root / "versions" / profile.version_id / ".manifest.toml")
+    manifest_path = root / "versions" / profile.version_id / ".manifest.toml"
     entry_name = "index.html"
     if manifest_path.exists():
         vm = version_manifest_from_dict(read_toml(manifest_path))

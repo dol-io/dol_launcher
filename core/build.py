@@ -64,6 +64,7 @@ def _find_entry_html(merged_dir: Path, base_dir: Path) -> Path:
 # ModLoader injection (base64-embed approach, matching Lyra)
 # ---------------------------------------------------------------------------
 
+
 def _read_mod_as_base64(zip_path: Path) -> str:
     """Read a ``.mod.zip`` file and return its content as a base64 string."""
     return base64.b64encode(zip_path.read_bytes()).decode("ascii")
@@ -95,11 +96,7 @@ def _inject_mods_into_html(html_path: Path, mod_zips: list[Path]) -> None:
         existing_list: list[str] = json.loads(match.group(1))
         existing_list.extend(new_entries)
         replacement = f"window.modDataValueZipList = {json.dumps(existing_list)};"
-        content = (
-            content[: match.start()]
-            + replacement
-            + content[match.end() :]
-        )
+        content = content[: match.start()] + replacement + content[match.end() :]
     else:
         # No ModLoader array present – create one.
         script_block = (
