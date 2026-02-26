@@ -1,4 +1,4 @@
-# dolctl
+# DoL Launcher
 
 **dolctl** 是一个 Degrees of Lewdity (DoL) 启动器 CLI 工具，支持多版本管理、Profile 切换和本地 HTTP 服务启动。
 
