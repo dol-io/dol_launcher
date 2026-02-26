@@ -1,21 +1,24 @@
 from __future__ import annotations
 
+import base64
 import re
 from pathlib import Path
 import json
+import logging
 import os
 import shutil
 
 from .profiles import get_profile
 from infra.fs import ensure_dir, safe_rmtree, now_iso
-from core.models import BuildResult, DolCtlError
+from infra.toml import read_toml
+from core.models import BuildResult, DolCtlError, version_manifest_from_dict
 
+logger = logging.getLogger(__name__)
 
 IGNORED_FILES = {".manifest.toml"}
 
-# Marker wrapped around injected script so it can be detected / replaced cleanly
-_INJECT_MARKER_START = "<!-- dolctl-mods-inject-start -->"
-_INJECT_MARKER_END = "<!-- dolctl-mods-inject-end -->"
+# Regex used by Lyra / DoL ModLoader to locate the mod list in the HTML.
+_MOD_LIST_PATTERN = r"window\.modDataValueZipList\s*=\s*(\[.*?\]);"
 
 
 def _copy_tree(src: Path, dest: Path) -> None:
@@ -32,54 +35,85 @@ def _copy_tree(src: Path, dest: Path) -> None:
             shutil.copy2(src_file, dest_file)
 
 
-def _build_inject_script(mod_paths: list[str]) -> str:
-    """Build the JavaScript snippet that registers mod zips with DoL ModLoader."""
-    paths_js = ", ".join(f'"{ p}"' for p in mod_paths)
-    return (
-        f"{_INJECT_MARKER_START}\n"
-        '<script type="text/javascript">\n'
-        "(function () {\n"
-        "  window.modList = window.modList || [];\n"
-        + "".join(f'  window.modList.push("{p}");\n' for p in mod_paths)
-        + "}());\n"
-        "</script>\n"
-        f"{_INJECT_MARKER_END}"
-    )
+def _find_entry_html(merged_dir: Path, base_dir: Path) -> Path:
+    """Resolve the entry HTML file inside *merged_dir*.
 
-
-def _inject_mods_into_html(html_path: Path, mod_zip_names: list[str]) -> None:
+    Uses the version manifest ``entry`` field when available, otherwise
+    falls back to glob-matching ``*.html`` at the root level.
     """
-    Inject a window.modList bootstrap script into index.html.
+    manifest_path = base_dir / ".manifest.toml"
+    if manifest_path.exists():
+        manifest = version_manifest_from_dict(read_toml(manifest_path))
+        entry_name = manifest.entry
+    else:
+        entry_name = "index.html"
 
-    The script is inserted just before </head>. If a previous injection marker
-    is present (from a prior build), it is replaced atomically.
+    html_path = merged_dir / entry_name
+    if html_path.exists():
+        return html_path
 
-    mod_zip_names: relative paths like ["mods/modA.mod.zip", "mods/modB.mod.zip"]
+    # Fallback: first .html at root
+    html_files = sorted(merged_dir.glob("*.html"))
+    if html_files:
+        return html_files[0]
+
+    raise DolCtlError("No HTML entry file found in the built version.")
+
+
+# ---------------------------------------------------------------------------
+# ModLoader injection (base64-embed approach, matching Lyra)
+# ---------------------------------------------------------------------------
+
+def _read_mod_as_base64(zip_path: Path) -> str:
+    """Read a ``.mod.zip`` file and return its content as a base64 string."""
+    return base64.b64encode(zip_path.read_bytes()).decode("ascii")
+
+
+def _inject_mods_into_html(html_path: Path, mod_zips: list[Path]) -> None:
+    """Inject mod zips into the HTML's ``window.modDataValueZipList``.
+
+    This follows the same strategy as Lyra's ``ModInjector.add_mods``:
+    each mod zip is base64-encoded and appended to the JavaScript array
+    ``window.modDataValueZipList`` that the DoL ModLoader reads at startup.
+
+    If the HTML already contains the array (ModLoader / Lyra builds), the
+    new entries are appended.  If not (vanilla builds), the array is created
+    inside a new ``<script>`` block before ``</head>``.
     """
     content = html_path.read_text(encoding="utf-8")
 
-    # Remove any previous injection
-    content = re.sub(
-        rf"{re.escape(_INJECT_MARKER_START)}.*?{re.escape(_INJECT_MARKER_END)}",
-        "",
-        content,
-        flags=re.DOTALL,
-    )
+    # Base64-encode each mod zip
+    new_entries: list[str] = []
+    for zp in mod_zips:
+        logger.info("  Embedding mod: %s", zp.name)
+        new_entries.append(_read_mod_as_base64(zp))
 
-    if not mod_zip_names:
-        html_path.write_text(content, encoding="utf-8")
-        return
+    match = re.search(_MOD_LIST_PATTERN, content, re.DOTALL)
 
-    inject_block = _build_inject_script(mod_zip_names)
-
-    # Try to inject just before </head>
-    if "</head>" in content:
-        content = content.replace("</head>", inject_block + "\n</head>", 1)
+    if match:
+        # HTML already has modDataValueZipList – parse and extend it.
+        existing_list: list[str] = json.loads(match.group(1))
+        existing_list.extend(new_entries)
+        replacement = f"window.modDataValueZipList = {json.dumps(existing_list)};"
+        content = (
+            content[: match.start()]
+            + replacement
+            + content[match.end() :]
+        )
     else:
-        # Fallback: prepend to file
-        content = inject_block + "\n" + content
+        # No ModLoader array present – create one.
+        script_block = (
+            '<script type="text/javascript">'
+            f"window.modDataValueZipList = {json.dumps(new_entries)};"
+            "</script>"
+        )
+        if "</head>" in content:
+            content = content.replace("</head>", script_block + "\n</head>", 1)
+        else:
+            content = script_block + "\n" + content
 
     html_path.write_text(content, encoding="utf-8")
+    logger.info("  Injected %d mod(s) into %s", len(new_entries), html_path.name)
 
 
 def build_runtime(root: Path, profile_name: str, clean: bool = True) -> BuildResult:
@@ -101,11 +135,9 @@ def build_runtime(root: Path, profile_name: str, clean: bool = True) -> BuildRes
     # 1. Copy base version files
     _copy_tree(base_dir, merged_dir)
 
-    # 2. Copy mod zips and inject into index.html
-    mod_zip_names: list[str] = []
+    # 2. Collect mod zips and inject into HTML (base64-embed, Lyra style)
+    mod_zip_paths: list[Path] = []
     if profile.mod_order:
-        mods_dest = merged_dir / "mods"
-        ensure_dir(mods_dest)
         for mod_id in profile.mod_order:
             src_zip = root / "mods" / mod_id / f"{mod_id}.mod.zip"
             if not src_zip.exists():
@@ -113,22 +145,13 @@ def build_runtime(root: Path, profile_name: str, clean: bool = True) -> BuildRes
                     f"Mod zip not found for '{mod_id}': {src_zip}\n"
                     "The mod may have been deleted. Remove it from the profile first."
                 )
-            dest_zip = mods_dest / f"{mod_id}.mod.zip"
-            shutil.copy2(src_zip, dest_zip)
-            # Relative path as the browser will request it from the game root
-            mod_zip_names.append(f"mods/{mod_id}.mod.zip")
+            mod_zip_paths.append(src_zip)
 
-    # 3. Inject mod list into index.html
-    html_path = merged_dir / "index.html"
-    if not html_path.exists():
-        # Try any .html file at root
-        html_files = list(merged_dir.glob("*.html"))
-        if html_files:
-            html_path = html_files[0]
-        else:
-            raise DolCtlError("No index.html found in the built version.")
+    # 3. Locate entry HTML and inject mods
+    html_path = _find_entry_html(merged_dir, base_dir)
 
-    _inject_mods_into_html(html_path, mod_zip_names)
+    if mod_zip_paths:
+        _inject_mods_into_html(html_path, mod_zip_paths)
 
     # 4. Write build meta
     build_meta = {

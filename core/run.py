@@ -7,6 +7,8 @@ from .profiles import get_profile
 from .root import load_config
 from .serve import create_server
 from core.models import RunResult
+from infra.toml import read_toml
+from core.models import version_manifest_from_dict
 
 
 def prepare_run(
@@ -42,7 +44,13 @@ def prepare_run(
     if open_browser_override is not None:
         open_browser = open_browser_override
 
-    url = f"http://127.0.0.1:{actual_port}/"
+    # Determine the entry HTML filename from the version manifest
+    manifest_path = (root / "versions" / profile.version_id / ".manifest.toml")
+    entry_name = "index.html"
+    if manifest_path.exists():
+        vm = version_manifest_from_dict(read_toml(manifest_path))
+        entry_name = vm.entry
+    url = f"http://127.0.0.1:{actual_port}/{entry_name}"
     return RunResult(
         profile=profile_name,
         url=url,

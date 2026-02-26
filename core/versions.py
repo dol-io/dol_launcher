@@ -24,6 +24,24 @@ from core.models import (
 from providers.github import GitHubReleasesProvider
 
 
+def _find_entry_html(directory: Path) -> str:
+    """Find the main HTML file in the root of a game directory.
+
+    Different DoL variants may rename the entry HTML (e.g. not always
+    ``index.html``).  We look for any ``.html`` file at the top level
+    and return its name.  If ``index.html`` exists it is preferred.
+    """
+    if (directory / "index.html").exists():
+        return "index.html"
+    html_files = sorted(f.name for f in directory.iterdir() if f.is_file() and f.suffix.lower() == ".html")
+    if html_files:
+        return html_files[0]
+    raise DolCtlError(
+        "No .html entry file found in the game directory. "
+        "The archive may be corrupted or not a valid DoL release."
+    )
+
+
 def _versions_dir(root: Path) -> Path:
     return root / "versions"
 
@@ -192,8 +210,7 @@ def install_from_remote(
     temp_dir = Path(tempfile.mkdtemp(prefix="install_", dir=tmp_base))
     try:
         extract_zip(dest_zip, temp_dir, strip_single_dir=True)
-        if not (temp_dir / "index.html").exists():
-            raise DolCtlError("Installed version is missing index.html")
+        entry = _find_entry_html(temp_dir)
         manifest = VersionManifest(
             id=version_id,
             display_name=remote.display_name,
@@ -202,7 +219,7 @@ def install_from_remote(
             source_ref=remote.download_url,
             sha256=sha256,
             installed_at=now_iso(),
-            entry="index.html",
+            entry=entry,
         )
         _install_from_temp(root, temp_dir, version_id, manifest, force)
     except Exception:
@@ -229,8 +246,7 @@ def install_from_file(
     temp_dir = Path(tempfile.mkdtemp(prefix="install_", dir=tmp_base))
     try:
         extract_zip(file_path, temp_dir, strip_single_dir=True)
-        if not (temp_dir / "index.html").exists():
-            raise DolCtlError("Installed version is missing index.html")
+        entry = _find_entry_html(temp_dir)
         manifest = VersionManifest(
             id=version_id,
             display_name=version_id,
@@ -239,7 +255,7 @@ def install_from_file(
             source_ref=str(file_path),
             sha256=sha256,
             installed_at=now_iso(),
-            entry="index.html",
+            entry=entry,
         )
         _install_from_temp(root, temp_dir, version_id, manifest, force)
     except Exception:
@@ -258,8 +274,7 @@ def install_from_dir(
     dir_path = dir_path.expanduser().resolve()
     if not dir_path.exists():
         raise DolCtlError(f"Directory not found: {dir_path}")
-    if not (dir_path / "index.html").exists():
-        raise DolCtlError("Source directory is missing index.html")
+    entry = _find_entry_html(dir_path)
     if not version_id:
         version_id = _make_version_id(channel, dir_path.name)
     tmp_base = _download_cache_dir(root) / ".tmp"
@@ -275,7 +290,7 @@ def install_from_dir(
             source_ref=str(dir_path),
             sha256=None,
             installed_at=now_iso(),
-            entry="index.html",
+            entry=entry,
         )
         _install_from_temp(root, temp_dir, version_id, manifest, force)
     except Exception:
