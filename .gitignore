@@ -37,6 +37,8 @@ mods/
 profiles/
 runtime/
 *.log
+test/
+testdata/
 
 # Keep spec docs
 !AGENTS.md
