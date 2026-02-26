@@ -381,11 +381,16 @@ def run(
     profile: Optional[str] = typer.Option(None, "--profile"),
     port: Optional[int] = typer.Option(None, "--port"),
     no_browser: bool = typer.Option(False, "--no-browser"),
+    allow_lan: bool = typer.Option(
+        False, "--allow-lan", help="Allow LAN access (bind 0.0.0.0)"
+    ),
 ) -> None:
     root = _get_root(ctx)
     profile_name = _resolve_profile_name(root, profile)
     open_browser_override = False if no_browser else None
-    result = prepare_run(root, profile_name, port, open_browser_override)
+    result = prepare_run(
+        root, profile_name, port, open_browser_override, allow_lan=allow_lan
+    )
     typer.echo(f"Serving {result.url}")
     if result.open_browser:
         open_browser(result.url, enabled=True)
@@ -403,6 +408,9 @@ def serve(
     ctx: typer.Context,
     profile: Optional[str] = typer.Option(None, "--profile"),
     port: Optional[int] = typer.Option(None, "--port"),
+    allow_lan: bool = typer.Option(
+        False, "--allow-lan", help="Allow LAN access (bind 0.0.0.0)"
+    ),
 ) -> None:
     root = _get_root(ctx)
     profile_name = _resolve_profile_name(root, profile)
@@ -420,11 +428,24 @@ def serve(
     merged_dir = root / "runtime" / profile_name / "merged"
     if not merged_dir.exists():
         raise DolCtlError(f"Runtime not built for profile: {profile_name}")
+    # Resolve entry HTML name from version manifest
+    from infra.toml import read_toml
+    from core.models import version_manifest_from_dict
+
+    entry_name = "index.html"
+    if profile_data.version_id:
+        manifest_path = root / "versions" / profile_data.version_id / ".manifest.toml"
+        if manifest_path.exists():
+            vm = version_manifest_from_dict(read_toml(manifest_path))
+            entry_name = vm.entry
+    host = "0.0.0.0" if allow_lan else "127.0.0.1"
     server, actual_port = create_server(
         merged_dir,
-        host="127.0.0.1",
+        host=host,
         port=port_choice,
         allow_fallback=allow_fallback,
+        entry_name=entry_name,
+        allow_lan=allow_lan,
     )
     url = f"http://127.0.0.1:{actual_port}/"
     typer.echo(f"Serving {url}")

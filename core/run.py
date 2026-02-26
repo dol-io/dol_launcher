@@ -16,6 +16,7 @@ def prepare_run(
     profile_name: str,
     port_override: int | None,
     open_browser_override: bool | None,
+    allow_lan: bool = False,
 ) -> RunResult:
     config = load_config(root)
     profile = get_profile(root, profile_name)
@@ -31,11 +32,22 @@ def prepare_run(
         port = config.default_port
         allow_fallback = True
 
+    # Determine the entry HTML filename from the version manifest
+    manifest_path = root / "versions" / profile.version_id / ".manifest.toml"
+    entry_name = "index.html"
+    if manifest_path.exists():
+        vm = version_manifest_from_dict(read_toml(manifest_path))
+        entry_name = vm.entry
+
+    host = "0.0.0.0" if allow_lan else "127.0.0.1"
+
     server, actual_port = create_server(
         build_result.output_dir,
-        host="127.0.0.1",
+        host=host,
         port=port,
         allow_fallback=allow_fallback,
+        entry_name=entry_name,
+        allow_lan=allow_lan,
     )
 
     open_browser = config.open_browser
@@ -44,13 +56,8 @@ def prepare_run(
     if open_browser_override is not None:
         open_browser = open_browser_override
 
-    # Determine the entry HTML filename from the version manifest
-    manifest_path = root / "versions" / profile.version_id / ".manifest.toml"
-    entry_name = "index.html"
-    if manifest_path.exists():
-        vm = version_manifest_from_dict(read_toml(manifest_path))
-        entry_name = vm.entry
-    url = f"http://127.0.0.1:{actual_port}/{entry_name}"
+    # Always use 127.0.0.1 for the URL (even when binding 0.0.0.0)
+    url = f"http://127.0.0.1:{actual_port}/"
     return RunResult(
         profile=profile_name,
         url=url,

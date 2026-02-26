@@ -84,7 +84,7 @@ dolctl profile set-version <id>      # 设置 profile 版本 / Set profile versi
 dolctl build --profile <name>               # 构建运行目录 / Build runtime
 dolctl run --port 8799                      # 构建并启动服务 / Build and serve
 dolctl run --port 8799 --no-browser         # 不自动打开浏览器 / Don't open browser
-dolctl serve --port 8799                    # 仅启动已构建的服务 / Serve existing build
+dolctl serve --port 8799 --allow-lan        # 仅启动已构建的服务并允许局域网访问 / Serve existing build and allow lan access
 ```
 
 ## 目录结构 / Directory Layout
