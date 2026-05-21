@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-This repository currently contains the product specification in `requirement.md`. Treat it as the source of truth for behavior, acceptance checks, and module boundaries; update it if you intentionally diverge.
+This repository's product specification lives in `intro.md`; treat it as the source of truth for behavior, acceptance checks, and module boundaries, and update it if you intentionally diverge. Open review notes are tracked in `SUGGESTIONS.md` — consult it before starting non-trivial changes.
 
 ## Project Structure & Module Organization
 Expected layout:
@@ -20,7 +20,7 @@ Use Python 3.11 with `uv` (see `pyproject.toml`). Typical commands:
 - `uv run dolctl run --port 8799` to serve locally
 
 ## Coding Style & Naming Conventions
-Use 4-space indentation and PEP 8–style naming (`snake_case` functions, `PascalCase` classes). Match module naming patterns from the spec (`core_versions.py`, `infra_zip.py`, `providers_github.py`). Do not write across layers directly; interact through core interfaces.
+Use 4-space indentation and PEP 8–style naming (`snake_case` functions, `PascalCase` classes). The repository uses sub-package layout (`core/versions.py`, `infra/zip.py`, `providers/github.py`) — keep modules where they are and do not write across layers directly; interact through core interfaces.
 
 ## Testing Guidelines
 Tests are not committed yet. If you add them, place tests under `tests/` and name files `test_*.py`, then run `uv run pytest`. Until then, document manual verification steps in your PR (e.g., `dolctl init`, `dolctl build`, `dolctl run`).

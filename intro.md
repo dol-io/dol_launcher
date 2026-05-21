@@ -319,13 +319,17 @@ asset_regex = ".*\\.zip$"
 - 生成构建元信息
 
 **ModLoader 注入策略（核心）**
-仿照 Lyra `ModInjector.add_mods()`：在 `index.html` 的 `<head>` 中插入一段引导脚本，将各 mod zip 的相对路径写入 `window.modList`（或 ModLoader 识别的等效接口），使 ModLoader 在游戏启动时自动加载。
+仿照 Lyra `ModInjector.add_mods()`：将每个启用的 mod zip 以 base64 编码后写入 `index.html` 的 `window.modDataValueZipList` 数组（DoL ModLoader 识别的字段），使 ModLoader 在游戏启动时直接从内嵌数据加载，无需额外网络请求。
 
 具体流程：
 1. 复制 base version 文件树到 `merged/`（忽略 `.manifest.toml`）
-2. 将已启用 mod zip 复制到 `merged/mods/`
-3. 修改 `merged/index.html`，在 `<head>` 的 ModLoader `<script>` 标签前插入 mod 路径列表注入脚本
+2. 对 profile 的 `mod_order` 中每个 mod，读取 `mods/<id>/<id>.mod.zip` 并 base64 编码
+3. 修改 `merged/index.html`：
+   - 若 `<head>` 内已存在 `window.modDataValueZipList = [...]`（Lyra 风格的 base），追加新条目；
+   - 否则在 `</head>` 前插入一段新的 `<script>` 设置该数组。
 4. 写入 `build_meta.json`
+
+> 注：由于 mod 数据已嵌入 HTML，**无需**再把 zip 复制到 `merged/mods/`。spec 早期版本提到的「复制 mod zip 到 merged/mods/」已废弃。
 
 **输出 `build_meta.json`**：
 - base version id
@@ -338,9 +342,8 @@ asset_regex = ".*\\.zip$"
 
 **验收**
 - merged 目录存在且 `index.html` 可访问
-- `index.html` 中含有 mod 注入脚本（若有启用 mod）
-- mod zip 文件存在于 `merged/mods/`
-- `build_meta.json` 存在
+- `index.html` 中含有 `window.modDataValueZipList` 数组（若有启用 mod），数组成员为 base64 编码的 mod zip 内容
+- `build_meta.json` 存在并记录 base_version_id、mod_order、built_at
 
 ---
 
@@ -570,17 +573,17 @@ Mod 系统的设计与实现参照 [DoL-Lyra/Lyra](https://github.com/DoL-Lyra/L
 
 DoL 的 ModLoader 通过修改 `index.html` 加载外部 mod。注入方式参照 Lyra `ModInjector`：
 
-```python
-# 伪代码：在 index.html 的 <head> 内插入
-<script>
-window.modList = [
-  "mods/modA.mod.zip",
-  "mods/modB.mod.zip"
+```html
+<!-- 在 index.html 的 <head> 内插入；条目为 mod zip 的 base64 -->
+<script type="text/javascript">
+window.modDataValueZipList = [
+  "<base64-of-modA.mod.zip>",
+  "<base64-of-modB.mod.zip>"
 ];
 </script>
 ```
 
-Mod zip 内必须含 `boot.json`，ModLoader 据此识别加载内容。
+Mod zip 内必须含 `boot.json`，ModLoader 据此识别加载内容。Lyra 风格的 base 版本 HTML 可能已带 `window.modDataValueZipList`，构建时应解析现有数组并追加，而非新增第二个数组。
 
 ---
 

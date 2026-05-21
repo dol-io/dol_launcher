@@ -67,15 +67,30 @@ dolctl install --file <zip> --as <id>      # 从 zip 安装 / Install from zip
 dolctl install --dir <path> --as <id>      # 从目录安装 / Install from directory
 dolctl install latest --channel vanilla    # 从远程下载 / Download from remote
 dolctl use <version_id>                    # 切换版本 / Switch version
+dolctl version remove <version_id>         # 删除已安装版本 / Remove installed version
+```
+
+### Mod 管理 / Mod Management
+
+```bash
+dolctl mod list                              # 列出已安装 mod / List installed mods
+dolctl mod add <path_or_url> [--id <id>]     # 导入 mod / Import a mod
+dolctl mod add <path> --force                # 覆盖同名 mod / Overwrite existing mod
+dolctl mod remove <mod_id>                   # 删除 mod / Remove a mod
+dolctl mod info <mod_id>                     # 查看 mod 详情 / Show mod metadata
 ```
 
 ### Profile 管理 / Profile Management
 
 ```bash
-dolctl profile list                  # 列出 profile / List profiles
-dolctl profile create <name>         # 创建 profile / Create profile
-dolctl profile use <name>            # 切换活跃 profile / Switch active profile
-dolctl profile set-version <id>      # 设置 profile 版本 / Set profile version
+dolctl profile list                            # 列出 profile / List profiles
+dolctl profile create <name>                   # 创建 profile / Create profile
+dolctl profile use <name>                      # 切换活跃 profile / Switch active profile
+dolctl profile set-version <id>                # 设置 profile 版本 / Set profile version
+dolctl profile mod add <mod_id>                # 启用 mod / Enable a mod in profile
+dolctl profile mod remove <mod_id>             # 禁用 mod / Disable a mod in profile
+dolctl profile mod list                        # 列出 profile 内 mod 顺序 / List mods in profile
+dolctl profile mod reorder <id1> <id2> ...     # 重新排序 mod / Reorder mods (full list required)
 ```
 
 ### 构建与运行 / Build & Run
@@ -85,6 +100,36 @@ dolctl build --profile <name>               # 构建运行目录 / Build runtime
 dolctl run --port 8799                      # 构建并启动服务 / Build and serve
 dolctl run --port 8799 --no-browser         # 不自动打开浏览器 / Don't open browser
 dolctl serve --port 8799 --allow-lan        # 仅启动已构建的服务并允许局域网访问 / Serve existing build and allow lan access
+```
+
+## 远程渠道 / Remote Channels
+
+要使用 `dolctl install latest --channel <name>` 从网络下载版本，需先在 `.dolctl/config.toml` 中配置一个 channel（一次性）：
+
+To download versions via `dolctl install latest --channel <name>`, configure a channel in `.dolctl/config.toml` once:
+
+```toml
+[channels.vanilla]
+provider = "github"
+repo = "Vrelnir/degrees-of-lewdity"   # 示例 / example
+asset_regex = ".*\\.zip$"              # 匹配 release 资产名 / matches the release asset
+```
+
+- `repo` 指向 `owner/name` 形式的 GitHub 仓库。
+- `asset_regex` 用 `re.fullmatch` 校验，过于宽松会匹配到 source-code zip，请尽量精确。
+- 设了 `GITHUB_TOKEN` 环境变量可避免命中匿名访问的速率限制。
+
+- `repo` is a GitHub `owner/name` slug.
+- `asset_regex` is matched with `re.fullmatch`; an overly broad pattern may match source archives, so be specific.
+- Set `GITHUB_TOKEN` to avoid anonymous GitHub API rate limits.
+
+之后：
+
+Then:
+
+```bash
+dolctl version remote list --channel vanilla   # 列出可下载版本 / list remote versions
+dolctl install latest --channel vanilla        # 安装最新版本 / install the latest
 ```
 
 ## 目录结构 / Directory Layout
