@@ -8,9 +8,12 @@ from datetime import datetime, timezone
 
 from .root import load_config
 from infra.fs import ensure_dir, safe_rmtree, atomic_dir_move, now_iso, calc_sha256
+from infra.log import get_logger
 from infra.toml import read_toml, write_toml
 from infra.zip import extract_zip
 from infra.net import download_file
+
+logger = get_logger(__name__)
 from core.models import (
     DolCtlError,
     VersionManifest,
@@ -210,6 +213,7 @@ def install_from_remote(
     versions = list_remote_versions(root, channel)
     remote = _select_remote_version(versions, selector)
     version_id = _make_version_id(channel, remote.id)
+    logger.info("Installing %s from %s", version_id, remote.download_url)
 
     ensure_dir(_download_cache_dir(root))
     dest_zip = _download_cache_dir(root) / f"{version_id}-{remote.asset_name}"
@@ -235,6 +239,7 @@ def install_from_remote(
     except Exception:
         safe_rmtree(temp_dir)
         raise
+    logger.info("Installed %s -> versions/%s/", version_id, version_id)
     return version_id
 
 
@@ -250,6 +255,7 @@ def install_from_file(
         raise DolCtlError(f"File not found: {file_path}")
     if not version_id:
         version_id = _make_version_id(channel, file_path.stem)
+    logger.info("Installing %s from %s", version_id, file_path)
     sha256 = calc_sha256(file_path)
     tmp_base = _download_cache_dir(root) / ".tmp"
     ensure_dir(tmp_base)
@@ -271,6 +277,7 @@ def install_from_file(
     except Exception:
         safe_rmtree(temp_dir)
         raise
+    logger.info("Installed %s -> versions/%s/", version_id, version_id)
     return version_id
 
 
@@ -310,6 +317,7 @@ def install_from_dir(
     entry = _find_entry_html(dir_path)
     if not version_id:
         version_id = _make_version_id(channel, dir_path.name)
+    logger.info("Installing %s from %s", version_id, dir_path)
     tmp_base = _download_cache_dir(root) / ".tmp"
     ensure_dir(tmp_base)
     temp_dir = Path(tempfile.mkdtemp(prefix="install_", dir=tmp_base))
@@ -329,4 +337,5 @@ def install_from_dir(
     except Exception:
         safe_rmtree(temp_dir)
         raise
+    logger.info("Installed %s -> versions/%s/", version_id, version_id)
     return version_id

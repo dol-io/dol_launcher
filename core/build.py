@@ -4,16 +4,16 @@ import base64
 import re
 from pathlib import Path
 import json
-import logging
 import os
 import shutil
 
 from .profiles import get_profile
 from infra.fs import ensure_dir, safe_rmtree, now_iso
+from infra.log import get_logger
 from infra.toml import read_toml
 from core.models import BuildResult, DolCtlError, version_manifest_from_dict
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 IGNORED_FILES = {".manifest.toml"}
 
@@ -117,6 +117,12 @@ def build_runtime(root: Path, profile_name: str, clean: bool = True) -> BuildRes
     profile = get_profile(root, profile_name)
     if not profile.version_id:
         raise DolCtlError(f"Profile has no version set: {profile_name}")
+    logger.info(
+        "Building profile %s from version %s (%d mod(s))",
+        profile_name,
+        profile.version_id,
+        len(profile.mod_order),
+    )
 
     base_dir = root / "versions" / profile.version_id
     if not base_dir.exists():

@@ -38,7 +38,7 @@ from core.versions import (
     list_remote_versions,
     remove_version,
 )
-from infra.log import log_error
+from infra.log import log_error, setup_logging
 from infra.open import open_browser
 from core.models import DolCtlError
 
@@ -98,9 +98,17 @@ def with_errors(func):
 def main(
     ctx: typer.Context,
     root: Optional[Path] = typer.Option(None, "--root", "-r", help="Root directory"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Print INFO logs to stderr"),
     version: bool = typer.Option(False, "--version", help="Show version"),
 ) -> None:
-    ctx.obj = {"root": root}
+    ctx.obj = {"root": root, "verbose": verbose}
+    # Try to resolve root for the file log handler; non-fatal if it fails
+    # (e.g. `dolctl init` runs before a root exists).
+    try:
+        resolved = resolve_root(root)
+    except DolCtlError:
+        resolved = None
+    setup_logging(resolved, verbose=verbose)
     if version:
         typer.echo(__version__)
         raise typer.Exit()
