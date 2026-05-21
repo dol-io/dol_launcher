@@ -17,10 +17,11 @@ def prepare_run(
     port_override: int | None,
     open_browser_override: bool | None,
     allow_lan: bool = False,
+    clean: bool = False,
 ) -> RunResult:
     config = load_config(root)
     profile = get_profile(root, profile_name)
-    build_result = build_runtime(root, profile_name, clean=True)
+    build_result = build_runtime(root, profile_name, clean=clean)
 
     if port_override is not None:
         port = port_override

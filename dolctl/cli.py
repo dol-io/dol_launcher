@@ -450,10 +450,11 @@ def profile_mod_list(
 def build(
     ctx: typer.Context,
     profile: Optional[str] = typer.Option(None, "--profile"),
+    clean: bool = typer.Option(False, "--clean", help="Force a full rebuild"),
 ) -> None:
     root = _get_root(ctx)
     profile_name = _resolve_profile_name(root, profile)
-    result = build_runtime(root, profile_name, clean=True)
+    result = build_runtime(root, profile_name, clean=clean)
     typer.echo(f"Built runtime for {profile_name} at {result.output_dir}")
 
 
@@ -467,12 +468,18 @@ def run(
     allow_lan: bool = typer.Option(
         False, "--allow-lan", help="Allow LAN access (bind 0.0.0.0)"
     ),
+    clean: bool = typer.Option(False, "--clean", help="Force a full rebuild"),
 ) -> None:
     root = _get_root(ctx)
     profile_name = _resolve_profile_name(root, profile)
     open_browser_override = False if no_browser else None
     result = prepare_run(
-        root, profile_name, port, open_browser_override, allow_lan=allow_lan
+        root,
+        profile_name,
+        port,
+        open_browser_override,
+        allow_lan=allow_lan,
+        clean=clean,
     )
     typer.echo(f"Serving {result.url}")
     if result.open_browser:
