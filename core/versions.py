@@ -11,7 +11,6 @@ from infra.fs import ensure_dir, safe_rmtree, atomic_dir_move, now_iso, calc_sha
 from infra.log import get_logger
 from infra.toml import read_toml, write_toml
 from infra.zip import extract_zip
-from infra.net import download_file
 
 logger = get_logger(__name__)
 from core.models import (
@@ -24,7 +23,7 @@ from core.models import (
     remote_version_from_dict,
     remote_version_to_dict,
 )
-from providers.github import GitHubReleasesProvider
+import providers as _providers
 
 
 def _find_entry_html(directory: Path) -> str:
@@ -130,16 +129,14 @@ def _save_cache(path: Path, versions: list[RemoteVersion]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _get_provider(root: Path, channel: str) -> GitHubReleasesProvider:
+def _get_provider(root: Path, channel: str):
     config = load_config(root)
     channel_cfg = config.channels.get(channel)
     if channel_cfg is None:
         raise DolCtlError(f"Channel not configured: {channel}")
-    if channel_cfg.provider != "github":
-        raise DolCtlError(f"Unsupported provider: {channel_cfg.provider}")
-    if not channel_cfg.repo:
+    if not channel_cfg.repo and channel_cfg.provider == "github":
         raise DolCtlError(f"Channel repo is missing: {channel}")
-    return GitHubReleasesProvider(channel, channel_cfg.repo, channel_cfg.asset_regex)
+    return _providers.get_provider(channel, channel_cfg)
 
 
 def list_remote_versions(
@@ -217,7 +214,8 @@ def install_from_remote(
 
     ensure_dir(_download_cache_dir(root))
     dest_zip = _download_cache_dir(root) / f"{version_id}-{remote.asset_name}"
-    sha256 = download_file(remote.download_url, dest_zip)
+    provider = _get_provider(root, channel)
+    sha256 = provider.download(remote, dest_zip)
 
     tmp_base = _download_cache_dir(root) / ".tmp"
     ensure_dir(tmp_base)

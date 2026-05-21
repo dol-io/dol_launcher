@@ -2,23 +2,41 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Any
 
-from infra.net import fetch_json
-from core.models import RemoteVersion
+from core.models import ChannelConfig, RemoteVersion
+from infra.net import download_file, fetch_json
 
 
 class GitHubReleasesProvider:
+    """Read release assets from a GitHub repo via the public API.
+
+    Honours an optional ``GITHUB_TOKEN`` environment variable to lift the
+    anonymous rate limit during repeated fetches.
+    """
+
     def __init__(self, channel: str, repo: str, asset_regex: str) -> None:
         self.channel = channel
         self.repo = repo
         self.asset_pattern = re.compile(asset_regex)
+
+    # ---- internal helpers ---------------------------------------------------
 
     def _headers(self) -> dict[str, str] | None:
         token = os.environ.get("GITHUB_TOKEN")
         if not token:
             return None
         return {"Authorization": f"Bearer {token}"}
+
+    def _select_asset(self, assets: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for asset in assets:
+            name = str(asset.get("name", ""))
+            if self.asset_pattern.fullmatch(name):
+                return asset
+        return None
+
+    # ---- VersionProvider protocol -------------------------------------------
 
     def list_versions(self) -> list[RemoteVersion]:
         url = f"https://api.github.com/repos/{self.repo}/releases?per_page=30"
@@ -30,7 +48,9 @@ class GitHubReleasesProvider:
                 continue
             tag = str(release.get("tag_name") or "")
             name = str(release.get("name") or tag)
-            published_at = str(release.get("published_at") or release.get("created_at") or "")
+            published_at = str(
+                release.get("published_at") or release.get("created_at") or ""
+            )
             versions.append(
                 RemoteVersion(
                     id=tag or name,
@@ -44,9 +64,14 @@ class GitHubReleasesProvider:
             )
         return versions
 
-    def _select_asset(self, assets: list[dict[str, Any]]) -> dict[str, Any] | None:
-        for asset in assets:
-            name = str(asset.get("name", ""))
-            if self.asset_pattern.fullmatch(name):
-                return asset
-        return None
+    def download(self, version: RemoteVersion, dest: Path) -> str:
+        return download_file(version.download_url, dest, headers=self._headers())
+
+
+# Register under the "github" provider key so channels with
+# provider = "github" resolve here. Imported eagerly from providers/__init__.
+from . import register  # noqa: E402
+
+@register("github")
+def _factory(channel_name: str, config: ChannelConfig) -> GitHubReleasesProvider:
+    return GitHubReleasesProvider(channel_name, config.repo, config.asset_regex)

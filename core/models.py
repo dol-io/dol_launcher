@@ -14,6 +14,7 @@ class ChannelConfig:
     provider: str = "github"
     repo: str = ""
     asset_regex: str = ".*\\.zip$"
+    extra: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -107,14 +108,23 @@ class RunResult:
     open_browser: bool
 
 
+_RESERVED_CHANNEL_KEYS = {"provider", "repo", "asset_regex"}
+
+
 def config_from_dict(data: dict[str, Any]) -> Config:
     channels: dict[str, ChannelConfig] = {}
     for name, cfg in (data.get("channels") or {}).items():
         if isinstance(cfg, dict):
+            extra = {
+                k: str(v)
+                for k, v in cfg.items()
+                if k not in _RESERVED_CHANNEL_KEYS
+            }
             channels[name] = ChannelConfig(
                 provider=str(cfg.get("provider", "github")),
                 repo=str(cfg.get("repo", "")),
                 asset_regex=str(cfg.get("asset_regex", ".*\\.zip$")),
+                extra=extra,
             )
     return Config(
         default_profile=str(data.get("default_profile", "default")),
@@ -133,14 +143,16 @@ def config_to_dict(config: Config) -> dict[str, Any]:
         "index_cache_ttl_seconds": config.index_cache_ttl_seconds,
     }
     if config.channels:
-        data["channels"] = {
-            name: {
+        channels_dict: dict[str, dict[str, Any]] = {}
+        for name, cfg in config.channels.items():
+            entry: dict[str, Any] = {
                 "provider": cfg.provider,
                 "repo": cfg.repo,
                 "asset_regex": cfg.asset_regex,
             }
-            for name, cfg in config.channels.items()
-        }
+            entry.update(cfg.extra)
+            channels_dict[name] = entry
+        data["channels"] = channels_dict
     return data
 
 
