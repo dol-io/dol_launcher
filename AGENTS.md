@@ -22,6 +22,8 @@ Use Python 3.11 with `uv` (see `pyproject.toml`). Typical commands:
 ## Coding Style & Naming Conventions
 Use 4-space indentation and PEP 8–style naming (`snake_case` functions, `PascalCase` classes). The repository uses sub-package layout (`core/versions.py`, `infra/zip.py`, `providers/github.py`) — keep modules where they are and do not write across layers directly; interact through core interfaces.
 
+`dolctl/tui/` is the Textual front-end: `app.py` (DolctlApp), `modals.py`, `log_handler.py`, and `screens/<tab>.py` (one file per tab). TUI screens must call into `core.*` for all mutations — never write disk state directly — and call `notify_data_changed()` after every write so sibling tabs reload. The CLI in `dolctl/cli.py` must keep working without Textual being imported at module load; only `dolctl tui` imports the TUI package.
+
 ## Testing Guidelines
 Tests are not committed yet. If you add them, place tests under `tests/` and name files `test_*.py`, then run `uv run pytest`. Until then, document manual verification steps in your PR (e.g., `dolctl init`, `dolctl build`, `dolctl run`).
 

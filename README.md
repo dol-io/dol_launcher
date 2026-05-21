@@ -102,6 +102,16 @@ dolctl run --port 8799 --no-browser         # 不自动打开浏览器 / Don't o
 dolctl serve --port 8799 --allow-lan        # 仅启动已构建的服务并允许局域网访问 / Serve existing build and allow lan access
 ```
 
+### TUI 模式 / Interactive TUI
+
+```bash
+dolctl tui                                  # 打开交互式 TUI / Launch interactive TUI
+```
+
+七个 tab 覆盖所有命令：Home、Channels、Versions、Mods、Profiles、Run、Doctor。键位 `1`-`7` 切 tab，`F5` 刷新当前 tab，`q` 退出。Profiles tab 内 `空格` 切换 mod 启停、`+`/`-` 调整启用顺序。
+
+Seven tabs cover the full command surface: Home, Channels, Versions, Mods, Profiles, Run, Doctor. Hotkeys: `1`-`7` switch tab, `F5` refresh, `q` quit. Inside the Profiles tab, `space` toggles a mod's enabled state and `+`/`-` reorder enabled mods.
+
 ## 远程渠道 / Remote Channels
 
 最快方式是直接用内置预设：

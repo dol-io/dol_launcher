@@ -25,10 +25,12 @@ include = ["dolctl*", "core*", "infra*", "providers*"]
 testpaths = ["tests"]
 addopts = "-ra"
 filterwarnings = ["ignore::DeprecationWarning"]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
   "pytest>=8.0.0",
   "ruff>=0.4.0",
   "mypy>=1.8.0",
+  "pytest-asyncio>=1.3.0",
 ]
