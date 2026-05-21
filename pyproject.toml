@@ -20,6 +20,11 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["dolctl*", "core*", "infra*", "providers*"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning"]
+
 [dependency-groups]
 dev = [
   "pytest>=8.0.0",

@@ -65,8 +65,7 @@ def _slugify_mod_id(name: str, fallback_seed: str = "") -> str:
     slug = slug.strip("_")
     if slug:
         return slug
-    seed_source = fallback_seed or name or "mod"
-    digest = hashlib.sha1(seed_source.encode("utf-8")).hexdigest()[:6]
+    digest = hashlib.sha1((name or fallback_seed or "mod").encode("utf-8")).hexdigest()[:6]
     fallback = _slugify_mod_id(fallback_seed) if fallback_seed else ""
     fallback = fallback or "mod"
     return f"{fallback}-{digest}"
