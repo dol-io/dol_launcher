@@ -4,7 +4,10 @@
 
 > 审阅时间：2026-05-21 · 审阅范围：`core/`、`infra/`、`providers/`、`dolctl/`、`intro.md`、`AGENTS.md`、`README.md`
 >
-> 进度（2026-05-21 第二轮）：已解决 #1、#2、#3、#5、#6、#7、#8、#12、#15、#16；其余条目仍待处理。已解决项标 ✅。
+> 进度（2026-05-21 第三轮）：除 P3 长期演进项外全部落地。
+> - 第二轮已解决：#1、#2、#3、#5、#6、#7、#8、#12、#15、#16。
+> - 第三轮新增：#4（下载进度仍未做，下面有补充）、#9（channel CLI 子系统）、#10、#11、#13、#14、#18（增量构建）、#19（Provider 抽象）。
+> 已解决项标 ✅；部分解决标 ⚠️。
 
 ---
 
@@ -35,7 +38,7 @@
 
 ## P1 — 用户体验 / 缺失功能
 
-### 4. 大文件下载无进度条
+### 4. 大文件下载无进度条 ⚠️ 未解决（仅记录日志，未做交互式进度条）
 - 位置：`infra/net.py:24-41`
 - 现状：DoL 完整包 100MB+，`download_file` 静默下载，用户不知道是否卡死。
 - 建议：在 `client.stream` 循环中按 `response.headers.get("content-length")` 输出进度（每 ~5% 一次），或接入 `rich.progress`。CLI 与库使用要分层：在 `core/versions.py` 调用处包一层进度回调，`infra/net.py` 接受 `on_progress: Callable[[int,int], None] | None`。
@@ -61,7 +64,7 @@
 - 现状：默认 `.*\.zip$` 会匹配 release 的 source code 自动 zip。对 DoL vanilla 这是错的（应只匹配真正的游戏包）。
 - 建议：默认改为更严格的、文档里给出 vanilla 与 variant 的示例；并把 `re.match` 改为 `re.fullmatch` 以避免「前缀匹配」的隐含陷阱。
 
-### 9. 缺少 channel 管理命令
+### 9. 缺少 channel 管理命令 ✅ 已解决（含内置预设）
 - 位置：用户需手编 `.dolctl/config.toml` 才能用 `install latest`。
 - 建议：增加 `dolctl channel add <name> --provider github --repo <user/repo> [--asset-regex ...]` 与 `dolctl channel list/remove`。降低首次使用门槛。
 
@@ -69,12 +72,12 @@
 
 ## P2 — 代码质量 / 可维护性
 
-### 10. CLI 错误处理依赖 `click` 内部 API
+### 10. CLI 错误处理依赖 `click` 内部 API ✅ 已解决
 - 位置：`dolctl/cli.py:8,82`（`import click; click.get_current_context(silent=True)`）
 - 现状：typer 是建立在 click 之上，但混用 typer 的 `typer.Context` 与 click 的 `get_current_context` 是不必要的耦合。
 - 建议：把 `with_errors` 改为接受 `typer.Context`（已经是各命令的参数），从函数参数读取而非全局调用 click API。
 
-### 11. `serve.py` 同时使用 `type(...)` 动态子类化 + `functools.partial`
+### 11. `serve.py` 同时使用 `type(...)` 动态子类化 + `functools.partial` ✅ 已解决（抽出命名 helper + 共享 access check）
 - 位置：`core/serve.py:79-85`
 - 现状：两层间接降低了可读性。
 - 建议：要么定义一个真正的子类（如 `_ConfiguredHandler`）在模块顶层并通过类属性配置，要么传一个 factory 函数。文档注释里也已经说明了为什么不能用 `partial` 传 `entry_name`，可以保留注释但简化代码结构。
@@ -84,12 +87,12 @@
 - 现状：纯 CJK 或纯 emoji 的 mod name 会全部被替换为 `_`，最终 strip 后变成 `""`，回退到 `"mod"`。多个无 ASCII 名字的 mod 都会撞 `"mod"` 这个 id。
 - 建议：当 slug 退化时，附加 zip 文件名 stem 或简短 hash（如 `mod-3a7f`），保证唯一。
 
-### 13. `infra/log.py` 仅在错误时记录
+### 13. `infra/log.py` 仅在错误时记录 ✅ 已解决（带 --verbose 与文件日志）
 - 位置：`infra/log.py:10-19`、`dolctl/cli.py:73`
 - 现状：成功的 install/build 没有任何日志痕迹。spec §9.1 只要求失败留下日志，因此非阻断，但调试时无操作流水。
 - 建议：把 `log.py` 抽象成 `info/warn/error` 三档（写入 `.dolctl/logs/YYYY-MM-DD.log`），关键步骤（install start/finish、build start/finish）写 info。
 
-### 14. 没有任何自动化测试
+### 14. 没有任何自动化测试 ✅ 已解决（pytest 99 通过）
 - 位置：`pyproject.toml` `dev` 组已有 pytest，但 `tests/` 不存在。
 - 建议：起码补足以下单元测试（hermetic，不打网络）：
   - `infra/zip.py`：zip-slip 抵抗、`strip_single_dir` 行为。
@@ -119,10 +122,10 @@
 - 仍按 Lyra 的 base64 路线，但把数据切到独立的 `mods.bundle.js`，HTML 只 `<script src=...>`。
 - 或改回路径注入（spec 原始设计），把 mod zip 真实拷到 `merged/mods/`，HTTP 服务直接提供。两种各有利弊，需要在性能/兼容性上权衡。
 
-### 18. 增量构建
+### 18. 增量构建 ✅ 已解决
 当前每次 `run` 都 `clean=True` 全量复制。DoL 资源 ~1GB 级别，每次冷启动有几秒到十几秒拷贝代价。可在 `build_meta.json` 中保留源 manifest 的 sha256 + mod_order 哈希，若未变则跳过复制（spec §12 已列出）。
 
-### 19. Provider 抽象只剩 GitHub
+### 19. Provider 抽象只剩 GitHub ✅ 已解决（注册表 + Protocol）
 `providers/github.py` 是唯一实现；`core/versions.py:_get_provider` 显式判断 `provider != "github"` 抛错，未通过接口实例化。未来加 `gitea`/`mirror`/`local-index` 时，最好抽出一个 `VersionProvider` 协议 + 注册表。
 
 ---
