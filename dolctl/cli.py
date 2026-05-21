@@ -5,8 +5,6 @@ from typing import Optional
 import functools
 import inspect
 
-import click
-
 import typer
 
 from . import __version__
@@ -77,19 +75,40 @@ def _handle_error(ctx: typer.Context, exc: DolCtlError) -> None:
     raise typer.Exit(code=1)
 
 
+def _extract_ctx(
+    sig: inspect.Signature, args: tuple, kwargs: dict
+) -> Optional[typer.Context]:
+    """Pull the ``ctx`` argument out of a call, if the signature declares one.
+
+    Typer guarantees the value is a ``typer.Context`` (a ``click.Context``
+    subclass) when it dispatches, so we trust the signature without an
+    isinstance probe.
+    """
+    params = list(sig.parameters)
+    if "ctx" not in params:
+        return None
+    if "ctx" in kwargs:
+        return kwargs["ctx"]
+    idx = params.index("ctx")
+    return args[idx] if idx < len(args) else None
+
+
 def with_errors(func):
+    sig = inspect.signature(func)
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        ctx = click.get_current_context(silent=True)
         try:
             return func(*args, **kwargs)
         except DolCtlError as exc:
-            if ctx is None:
+            ctx = _extract_ctx(sig, args, kwargs)
+            if ctx is not None:
+                _handle_error(ctx, exc)
+            else:
                 typer.echo(f"Error: {exc}", err=True)
-                raise typer.Exit(code=1)
-            _handle_error(ctx, exc)
+                raise typer.Exit(code=1) from exc
 
-    wrapper.__signature__ = inspect.signature(func)
+    wrapper.__signature__ = sig
     return wrapper
 
 
