@@ -7,6 +7,7 @@ Each mod zip must contain a boot.json at the root level (DoL ModLoader format).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import zipfile
@@ -50,23 +51,39 @@ def _read_boot_json(zip_path: Path) -> dict | None:
         return None
 
 
-def _slugify_mod_id(name: str) -> str:
-    """Convert a display name to a usable mod_id."""
-    slug = name.lower().replace(" ", "_")
+def _slugify_mod_id(name: str, fallback_seed: str = "") -> str:
+    """Convert a display name to an ASCII mod_id.
+
+    Non-ASCII characters (CJK, emoji, …) collapse to ``_`` and may strip
+    away entirely. When the result would be empty or generic, use
+    *fallback_seed* (e.g. the zip filename stem) and append a short hash so
+    distinct sources never share the same id.
+    """
+    ascii_only = "".join(c if ord(c) < 128 else "_" for c in name.lower())
+    slug = ascii_only.replace(" ", "_")
     slug = "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in slug)
-    return slug.strip("_") or "mod"
+    slug = slug.strip("_")
+    if slug:
+        return slug
+    seed_source = fallback_seed or name or "mod"
+    digest = hashlib.sha1(seed_source.encode("utf-8")).hexdigest()[:6]
+    fallback = _slugify_mod_id(fallback_seed) if fallback_seed else ""
+    fallback = fallback or "mod"
+    return f"{fallback}-{digest}"
 
 
 def add_mod_from_zip(
     root: Path,
     path_or_url: str,
     mod_id: Optional[str] = None,
+    force: bool = False,
 ) -> str:
     """
     Import a ModLoader-format .mod.zip into mods/<mod_id>/.
 
     - If path_or_url is a URL, the zip is downloaded to .dolctl/cache/downloads/ first.
     - boot.json inside the zip is parsed for name/version metadata.
+    - When *force* is True, an existing mod directory with the same id is replaced.
     - Returns the mod_id used.
     """
     source_ref = path_or_url
@@ -110,13 +127,16 @@ def add_mod_from_zip(
         )
 
     if not mod_id:
-        mod_id = _slugify_mod_id(name)
+        mod_id = _slugify_mod_id(name, fallback_seed=zip_path.stem)
 
     mod_dir = _mod_dir(root, mod_id)
     if mod_dir.exists():
-        raise DolCtlError(
-            f"Mod already exists: {mod_id}. Use --id to specify a different id."
-        )
+        if not force:
+            raise DolCtlError(
+                f"Mod already exists: {mod_id}. "
+                "Use --force to overwrite or --id to specify a different id."
+            )
+        shutil.rmtree(mod_dir)
 
     ensure_dir(mod_dir)
 

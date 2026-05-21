@@ -47,6 +47,6 @@ class GitHubReleasesProvider:
     def _select_asset(self, assets: list[dict[str, Any]]) -> dict[str, Any] | None:
         for asset in assets:
             name = str(asset.get("name", ""))
-            if self.asset_pattern.match(name):
+            if self.asset_pattern.fullmatch(name):
                 return asset
         return None

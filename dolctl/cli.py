@@ -23,6 +23,7 @@ from core.profiles import (
     get_profile,
     list_profiles,
     remove_mod_from_profile,
+    reorder_mods,
     set_active_profile,
     set_profile_version,
 )
@@ -35,6 +36,7 @@ from core.versions import (
     install_from_remote,
     list_installed,
     list_remote_versions,
+    remove_version,
 )
 from infra.log import log_error
 from infra.open import open_browser
@@ -123,7 +125,7 @@ def where(ctx: typer.Context) -> None:
 def doctor(ctx: typer.Context) -> None:
     root = _get_root(ctx)
     missing: list[str] = []
-    for rel in [".dolctl", "versions", "profiles", "runtime"]:
+    for rel in [".dolctl", "versions", "mods", "profiles", "runtime"]:
         if not (root / rel).exists():
             missing.append(rel)
     if missing:
@@ -132,8 +134,18 @@ def doctor(ctx: typer.Context) -> None:
             typer.echo(f"- {rel}")
         raise typer.Exit(code=1)
     config = load_config(root)
+    state = load_state(root)
+    warnings: list[str] = []
+    if state.active_profile and not (root / "profiles" / state.active_profile).is_dir():
+        warnings.append(
+            f"Active profile '{state.active_profile}' does not exist on disk."
+        )
     if not config.channels:
-        typer.echo("No channels configured. Edit .dolctl/config.toml to add channels.")
+        warnings.append(
+            "No channels configured. Edit .dolctl/config.toml to add channels."
+        )
+    for w in warnings:
+        typer.echo(w)
     typer.echo("OK")
 
 
@@ -147,6 +159,24 @@ def version_list(ctx: typer.Context) -> None:
         return
     for version in versions:
         typer.echo(f"{version.id}\t{version.channel}\t{version.installed_at}")
+
+
+@version_app.command("remove")
+@with_errors
+def version_remove(
+    ctx: typer.Context,
+    version_id: str = typer.Argument(..., help="Installed version id"),
+) -> None:
+    root = _get_root(ctx)
+    affected = remove_version(root, version_id)
+    typer.echo(f"Removed version: {version_id}")
+    if affected:
+        typer.echo(
+            "Warning: the following profiles still reference this version "
+            "and will fail to build until updated:"
+        )
+        for name in affected:
+            typer.echo(f"- {name}")
 
 
 @version_remote_app.command("list")
@@ -275,9 +305,10 @@ def mod_add(
     ctx: typer.Context,
     path_or_url: str = typer.Argument(..., help="Path to .mod.zip or a URL"),
     mod_id: Optional[str] = typer.Option(None, "--id", help="Override mod id"),
+    force: bool = typer.Option(False, "--force", help="Overwrite if mod id already exists"),
 ) -> None:
     root = _get_root(ctx)
-    installed_id = add_mod_from_zip(root, path_or_url, mod_id)
+    installed_id = add_mod_from_zip(root, path_or_url, mod_id, force=force)
     typer.echo(f"Installed mod: {installed_id}")
 
 
@@ -339,6 +370,21 @@ def profile_mod_remove(
     profile_name = _resolve_profile_name(root, profile)
     remove_mod_from_profile(root, profile_name, mod_id)
     typer.echo(f"Removed {mod_id} from profile {profile_name}")
+
+
+@profile_mod_app.command("reorder")
+@with_errors
+def profile_mod_reorder(
+    ctx: typer.Context,
+    mod_ids: list[str] = typer.Argument(
+        ..., help="All mod ids in the desired load order"
+    ),
+    profile: Optional[str] = typer.Option(None, "--profile"),
+) -> None:
+    root = _get_root(ctx)
+    profile_name = _resolve_profile_name(root, profile)
+    reorder_mods(root, profile_name, mod_ids)
+    typer.echo(f"Reordered mods in profile {profile_name}")
 
 
 @profile_mod_app.command("list")

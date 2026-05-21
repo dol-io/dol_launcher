@@ -274,6 +274,29 @@ def install_from_file(
     return version_id
 
 
+def remove_version(root: Path, version_id: str) -> list[str]:
+    """Delete ``versions/<version_id>/`` and return profiles that referenced it.
+
+    The referencing profiles are *not* modified — the caller decides whether
+    to warn the user or clear ``profile.version_id``.
+    """
+    dest = _versions_dir(root) / version_id
+    if not dest.exists():
+        raise DolCtlError(f"Version not found: {version_id}")
+    affected: list[str] = []
+    profiles_dir = root / "profiles"
+    if profiles_dir.exists():
+        for entry in profiles_dir.iterdir():
+            profile_toml = entry / "profile.toml"
+            if not profile_toml.exists():
+                continue
+            data = read_toml(profile_toml)
+            if str(data.get("version_id", "")) == version_id:
+                affected.append(entry.name)
+    safe_rmtree(dest)
+    return affected
+
+
 def install_from_dir(
     root: Path,
     dir_path: Path,
