@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import os
 import socket
 from typing import Any
 from urllib.parse import urlparse
@@ -27,17 +28,30 @@ def download_file(
     headers: dict[str, str] | None = None,
     timeout: float = 60.0,
 ) -> str:
+    """Download *url* to *dest* atomically and return the sha256 of the body.
+
+    The body is streamed to a ``<dest>.part`` file and only renamed to *dest*
+    after a successful transfer. If the transfer fails or is interrupted, the
+    partial file is removed so the next attempt starts clean.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
     hasher = hashlib.sha256()
-    with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
-        with client.stream("GET", url) as response:
-            response.raise_for_status()
-            with dest.open("wb") as handle:
-                for chunk in response.iter_bytes():
-                    if not chunk:
-                        continue
-                    handle.write(chunk)
-                    hasher.update(chunk)
+    try:
+        with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
+            with client.stream("GET", url) as response:
+                response.raise_for_status()
+                with part.open("wb") as handle:
+                    for chunk in response.iter_bytes():
+                        if not chunk:
+                            continue
+                        handle.write(chunk)
+                        hasher.update(chunk)
+    except BaseException:
+        if part.exists():
+            part.unlink()
+        raise
+    os.replace(part, dest)
     return hasher.hexdigest()
 
 
