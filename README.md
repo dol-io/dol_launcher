@@ -104,33 +104,37 @@ dolctl serve --port 8799 --allow-lan        # 仅启动已构建的服务并允�
 
 ## 远程渠道 / Remote Channels
 
-要使用 `dolctl install latest --channel <name>` 从网络下载版本，需先在 `.dolctl/config.toml` 中配置一个 channel（一次性）：
+最快方式是直接用内置预设：
 
-To download versions via `dolctl install latest --channel <name>`, configure a channel in `.dolctl/config.toml` once:
+The quickest path is the built-in preset:
 
-```toml
-[channels.vanilla]
-provider = "github"
-repo = "Vrelnir/degrees-of-lewdity"   # 示例 / example
-asset_regex = ".*\\.zip$"              # 匹配 release 资产名 / matches the release asset
+```bash
+dolctl channel preset list                        # 查看可用预设 / list available presets
+dolctl channel add vanilla --preset dol-vanilla   # 配好一个 channel / configure one channel
+dolctl version remote list --channel vanilla     # 列出可下载版本 / list remote versions
+dolctl install latest --channel vanilla          # 安装最新版本 / install the latest
+```
+
+也可自行指定参数：
+
+Or supply the fields explicitly:
+
+```bash
+dolctl channel add vanilla \
+    --provider github \
+    --repo Vrelnir/degrees-of-lewdity \
+    --asset-regex "Degrees of Lewdity.*\.zip"
 ```
 
 - `repo` 指向 `owner/name` 形式的 GitHub 仓库。
 - `asset_regex` 用 `re.fullmatch` 校验，过于宽松会匹配到 source-code zip，请尽量精确。
 - 设了 `GITHUB_TOKEN` 环境变量可避免命中匿名访问的速率限制。
+- `dolctl channel set` / `dolctl channel remove` 可继续维护已有 channel。
 
 - `repo` is a GitHub `owner/name` slug.
 - `asset_regex` is matched with `re.fullmatch`; an overly broad pattern may match source archives, so be specific.
 - Set `GITHUB_TOKEN` to avoid anonymous GitHub API rate limits.
-
-之后：
-
-Then:
-
-```bash
-dolctl version remote list --channel vanilla   # 列出可下载版本 / list remote versions
-dolctl install latest --channel vanilla        # 安装最新版本 / install the latest
-```
+- Use `dolctl channel set` / `dolctl channel remove` to maintain channels later.
 
 ## 目录结构 / Directory Layout
 

@@ -9,6 +9,14 @@ import typer
 
 from . import __version__
 from core.build import build_runtime
+from core.channel_presets import PRESETS
+from core.channels import (
+    add_channel,
+    get_channel,
+    list_channels,
+    remove_channel,
+    set_channel_fields,
+)
 from core.mods import (
     add_mod_from_zip,
     get_mod_info,
@@ -46,6 +54,8 @@ version_remote_app = typer.Typer()
 profile_app = typer.Typer()
 profile_mod_app = typer.Typer()
 mod_app = typer.Typer()
+channel_app = typer.Typer()
+channel_preset_app = typer.Typer()
 
 
 def _get_root(ctx: typer.Context) -> Path:
@@ -535,3 +545,103 @@ version_app.add_typer(version_remote_app, name="remote")
 app.add_typer(profile_app, name="profile")
 profile_app.add_typer(profile_mod_app, name="mod")
 app.add_typer(mod_app, name="mod")
+app.add_typer(channel_app, name="channel")
+channel_app.add_typer(channel_preset_app, name="preset")
+
+
+# ---------------------------------------------------------------------------
+# channel commands
+# ---------------------------------------------------------------------------
+
+
+@channel_app.command("list")
+@with_errors
+def channel_list(ctx: typer.Context) -> None:
+    root = _get_root(ctx)
+    entries = list_channels(root)
+    if not entries:
+        typer.echo("No channels configured. Try: dolctl channel add <name> --preset dol-vanilla")
+        return
+    for name, cfg in entries:
+        typer.echo(f"{name}\t{cfg.provider}\t{cfg.repo}\t{cfg.asset_regex}")
+
+
+@channel_app.command("show")
+@with_errors
+def channel_show(ctx: typer.Context, name: str = typer.Argument(...)) -> None:
+    root = _get_root(ctx)
+    cfg = get_channel(root, name)
+    typer.echo(f"name:        {name}")
+    typer.echo(f"provider:    {cfg.provider}")
+    typer.echo(f"repo:        {cfg.repo}")
+    typer.echo(f"asset_regex: {cfg.asset_regex}")
+    if cfg.extra:
+        typer.echo("extra:")
+        for k, v in cfg.extra.items():
+            typer.echo(f"  {k} = {v}")
+
+
+@channel_app.command("add")
+@with_errors
+def channel_add(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Channel name (e.g., vanilla)"),
+    preset: Optional[str] = typer.Option(
+        None, "--preset", help="Use a built-in preset (run `channel preset list`)"
+    ),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    repo: Optional[str] = typer.Option(None, "--repo", help="e.g. owner/name"),
+    asset_regex: Optional[str] = typer.Option(None, "--asset-regex"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    root = _get_root(ctx)
+    cfg = add_channel(
+        root,
+        name,
+        preset=preset,
+        provider=provider,
+        repo=repo,
+        asset_regex=asset_regex,
+        force=force,
+    )
+    typer.echo(f"Added channel {name} ({cfg.provider}: {cfg.repo})")
+
+
+@channel_app.command("remove")
+@with_errors
+def channel_remove(ctx: typer.Context, name: str = typer.Argument(...)) -> None:
+    root = _get_root(ctx)
+    remove_channel(root, name)
+    typer.echo(f"Removed channel: {name}")
+
+
+@channel_app.command("set")
+@with_errors
+def channel_set(
+    ctx: typer.Context,
+    name: str = typer.Argument(...),
+    provider: Optional[str] = typer.Option(None, "--provider"),
+    repo: Optional[str] = typer.Option(None, "--repo"),
+    asset_regex: Optional[str] = typer.Option(None, "--asset-regex"),
+) -> None:
+    root = _get_root(ctx)
+    set_channel_fields(
+        root,
+        name,
+        provider=provider,
+        repo=repo,
+        asset_regex=asset_regex,
+    )
+    typer.echo(f"Updated channel: {name}")
+
+
+@channel_preset_app.command("list")
+@with_errors
+def channel_preset_list() -> None:
+    if not PRESETS:
+        typer.echo("(no presets bundled)")
+        return
+    for key, preset in sorted(PRESETS.items()):
+        typer.echo(f"{key}\t{preset.provider}\t{preset.repo}")
+        if preset.description:
+            typer.echo(f"    {preset.description}")
