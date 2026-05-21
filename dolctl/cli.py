@@ -159,6 +159,16 @@ def where(ctx: typer.Context) -> None:
 
 @app.command()
 @with_errors
+def tui(ctx: typer.Context) -> None:
+    """Launch the interactive TUI front-end."""
+    root = _get_root(ctx)
+    from dolctl.tui.app import DolctlApp
+
+    DolctlApp(root).run()
+
+
+@app.command()
+@with_errors
 def doctor(ctx: typer.Context) -> None:
     root = _get_root(ctx)
     missing: list[str] = []
