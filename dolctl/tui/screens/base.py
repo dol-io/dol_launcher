@@ -7,13 +7,50 @@ The App bumps a reactive `data_version`; tabs watch it and call
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from textual.containers import Container
 
 if TYPE_CHECKING:
     from ..app import DolctlApp
+
+
+def _fmt_mb(b: int) -> str:
+    return f"{b / 1_048_576:.1f} MB"
+
+
+def make_progress_reporter(
+    app: "DolctlApp",
+    setter: Callable[[str, str], None],
+    label: str,
+    min_interval: float = 0.1,
+) -> Callable[[int, int | None], None]:
+    """Build a download progress callback that throttles UI updates.
+
+    The callback runs on the download worker thread; ``setter`` is the
+    bound RefreshableTab.set_status that marshals back to the UI thread
+    via ``call_from_thread``. Limiting to one update per ``min_interval``
+    (default 100 ms) keeps the UI responsive without dropping the final
+    completion update.
+    """
+    state = {"last": 0.0}
+
+    def report(downloaded: int, total: int | None) -> None:
+        now = time.monotonic()
+        # Always emit the very first tick and the completion tick.
+        if downloaded != total and now - state["last"] < min_interval:
+            return
+        state["last"] = now
+        if total:
+            pct = downloaded * 100 // total
+            msg = f"{label}: {_fmt_mb(downloaded)} / {_fmt_mb(total)} ({pct}%)"
+        else:
+            msg = f"{label}: {_fmt_mb(downloaded)}"
+        app.call_from_thread(setter, msg, "info")
+
+    return report
 
 
 class RefreshableTab(Container):

@@ -64,8 +64,10 @@ class GitHubReleasesProvider:
             )
         return versions
 
-    def download(self, version: RemoteVersion, dest: Path) -> str:
-        return download_file(version.download_url, dest, headers=self._headers())
+    def download(self, version: RemoteVersion, dest: Path, *, progress=None) -> str:
+        return download_file(
+            version.download_url, dest, headers=self._headers(), progress=progress
+        )
 
 
 # Register under the "github" provider key so channels with

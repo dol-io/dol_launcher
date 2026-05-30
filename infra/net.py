@@ -4,10 +4,16 @@ from pathlib import Path
 import hashlib
 import os
 import socket
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import httpx
+
+
+# A progress callback receives (downloaded_bytes, total_bytes_or_None).
+# total is None when the server omits Content-Length. Implementations
+# should be cheap — download_file invokes it once per network chunk.
+ProgressCallback = Callable[[int, int | None], None]
 
 
 def is_url(value: str) -> bool:
@@ -27,12 +33,17 @@ def download_file(
     dest: Path,
     headers: dict[str, str] | None = None,
     timeout: float = 60.0,
+    progress: ProgressCallback | None = None,
 ) -> str:
     """Download *url* to *dest* atomically and return the sha256 of the body.
 
     The body is streamed to a ``<dest>.part`` file and only renamed to *dest*
     after a successful transfer. If the transfer fails or is interrupted, the
     partial file is removed so the next attempt starts clean.
+
+    When *progress* is given, it is called once per network chunk with the
+    cumulative byte count and the total from the ``Content-Length`` header
+    (or ``None`` if the server didn't send one).
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
@@ -41,12 +52,18 @@ def download_file(
         with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
+                total_header = response.headers.get("content-length")
+                total = int(total_header) if total_header and total_header.isdigit() else None
+                downloaded = 0
                 with part.open("wb") as handle:
                     for chunk in response.iter_bytes():
                         if not chunk:
                             continue
                         handle.write(chunk)
                         hasher.update(chunk)
+                        downloaded += len(chunk)
+                        if progress is not None:
+                            progress(downloaded, total)
     except BaseException:
         if part.exists():
             part.unlink()

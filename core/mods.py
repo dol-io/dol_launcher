@@ -125,6 +125,7 @@ def add_mod_from_zip(
     path_or_url: str,
     mod_id: Optional[str] = None,
     force: bool = False,
+    progress=None,
 ) -> str:
     """
     Import a ModLoader-format .mod.zip into mods/<mod_id>/.
@@ -132,6 +133,7 @@ def add_mod_from_zip(
     - If path_or_url is a URL, the zip is downloaded to .dolctl/cache/downloads/ first.
     - boot.json inside the zip is parsed for name/version metadata.
     - When *force* is True, an existing mod directory with the same id is replaced.
+    - When *progress* is given, it is forwarded to ``download_file`` for URL imports.
     - Returns the mod_id used.
     """
     source_ref = path_or_url
@@ -144,7 +146,7 @@ def add_mod_from_zip(
         if not filename.endswith(".zip"):
             filename += ".zip"
         dest_path = cache_dir / filename
-        download_file(path_or_url, dest_path)
+        download_file(path_or_url, dest_path, progress=progress)
         zip_path = dest_path
         source = "url"
     else:

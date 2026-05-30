@@ -19,7 +19,7 @@ from core.versions import (
 )
 
 from ..modals import ConfirmModal, InputField, InputModal
-from .base import RefreshableTab
+from .base import RefreshableTab, make_progress_reporter
 
 
 class VersionsTab(RefreshableTab):
@@ -239,11 +239,15 @@ class VersionsTab(RefreshableTab):
             self.set_status("pick a channel first", "warn")
             return
 
+        progress = make_progress_reporter(
+            self.app, self.set_status, f"downloading latest {channel}"
+        )
+
         def worker() -> None:
             try:
                 # ``latest`` selector resolves to the newest published
                 # release inside install_from_remote (see core.versions).
-                vid = install_from_remote(self.root, channel, "latest")
+                vid = install_from_remote(self.root, channel, "latest", progress=progress)
             except Exception as exc:  # noqa: BLE001 — surface HTTP / extraction errors
                 self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return
@@ -257,9 +261,15 @@ class VersionsTab(RefreshableTab):
         if not ok:
             return
 
+        progress = make_progress_reporter(
+            self.app, self.set_status, f"downloading {selector}"
+        )
+
         def worker() -> None:
             try:
-                vid = install_from_remote(self.root, channel, selector)
+                vid = install_from_remote(
+                    self.root, channel, selector, progress=progress
+                )
             except Exception as exc:  # noqa: BLE001 — surface HTTP / extraction errors
                 self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return

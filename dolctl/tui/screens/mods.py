@@ -9,7 +9,7 @@ from core.models import DolCtlError
 from infra.net import is_url
 
 from ..modals import ConfirmModal, InfoModal, InputField, InputModal
-from .base import RefreshableTab
+from .base import RefreshableTab, make_progress_reporter
 
 
 class ModsTab(RefreshableTab):
@@ -85,10 +85,17 @@ class ModsTab(RefreshableTab):
         force = values["force"].lower() in {"y", "yes", "true", "1"}
         mod_id = values["mod_id"] or None
 
+        url_download = is_url(path_or_url)
+        progress = (
+            make_progress_reporter(self.app, self.set_status, "downloading mod")
+            if url_download
+            else None
+        )
+
         def worker() -> None:
             try:
                 installed = add_mod_from_zip(
-                    self.root, path_or_url, mod_id=mod_id, force=force
+                    self.root, path_or_url, mod_id=mod_id, force=force, progress=progress
                 )
             except Exception as exc:  # noqa: BLE001 — surface HTTP / zip errors
                 self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
@@ -97,7 +104,7 @@ class ModsTab(RefreshableTab):
                 self.set_status, f"added mod {installed}", "success")
             self.app.call_from_thread(self.notify_data_changed)
 
-        if is_url(path_or_url):
+        if url_download:
             self.set_status("downloading mod…")
             self.run_worker(worker, exclusive=True, thread=True)
         else:

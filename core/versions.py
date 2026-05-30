@@ -226,6 +226,7 @@ def install_from_remote(
     channel: str,
     selector: str,
     force: bool = False,
+    progress=None,
 ) -> str:
     channel, selector = _resolve_selector(selector, channel)
     versions = list_remote_versions(root, channel)
@@ -236,7 +237,12 @@ def install_from_remote(
     ensure_dir(_download_cache_dir(root))
     dest_zip = _download_cache_dir(root) / f"{version_id}-{remote.asset_name}"
     provider = _get_provider(root, channel)
-    sha256 = provider.download(remote, dest_zip)
+    # New-style providers accept a progress callback; older custom providers
+    # may not. Fall back gracefully so out-of-tree providers don't break.
+    try:
+        sha256 = provider.download(remote, dest_zip, progress=progress)
+    except TypeError:
+        sha256 = provider.download(remote, dest_zip)
 
     tmp_base = _download_cache_dir(root) / ".tmp"
     ensure_dir(tmp_base)
