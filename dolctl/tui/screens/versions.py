@@ -50,9 +50,10 @@ class VersionsTab(RefreshableTab):
                 remote.add_columns("id", "published_at", "asset")
                 yield remote
         with Horizontal(id="actions"):
+            yield Button("Install latest", id="btn-install-latest", variant="primary")
+            yield Button("Install selected", id="btn-install-remote")
             yield Button("Install local zip", id="btn-install-zip")
             yield Button("Install local dir", id="btn-install-dir")
-            yield Button("Install selected remote", id="btn-install-remote", variant="primary")
             yield Button("Use", id="btn-use")
             yield Button("Remove", id="btn-remove", variant="error")
 
@@ -102,10 +103,27 @@ class VersionsTab(RefreshableTab):
             self._install_dir()
         elif bid == "btn-install-remote":
             self._install_remote()
+        elif bid == "btn-install-latest":
+            self._install_latest()
         elif bid == "btn-use":
             self._use_selected()
         elif bid == "btn-remove":
             self._remove_selected()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        # Auto-refresh the remote list when the user picks a channel —
+        # otherwise the flow needs four steps (pick → Refresh → row → Install)
+        # and the second step is non-obvious.
+        if event.select.id != "channel-select":
+            return
+        if event.value == Select.NULL:
+            return
+        # Skip programmatic resets posted by set_options(...). The widget's
+        # live value matches event.value only when the user actually
+        # changed the selection.
+        if event.select.value != event.value:
+            return
+        self._refresh_remote()
 
     def _refresh_remote(self) -> None:
         channel = self._selected_channel()
@@ -211,6 +229,29 @@ class VersionsTab(RefreshableTab):
             ),
             lambda ok: self._do_install_remote(channel, selector, ok),
         )
+
+    def _install_latest(self) -> None:
+        """One-click: install the most recently published remote version
+        for the picked channel. Always fetches fresh from the network.
+        """
+        channel = self._selected_channel()
+        if channel is None:
+            self.set_status("pick a channel first", "warn")
+            return
+
+        def worker() -> None:
+            try:
+                # ``latest`` selector resolves to the newest published
+                # release inside install_from_remote (see core.versions).
+                vid = install_from_remote(self.root, channel, "latest")
+            except Exception as exc:  # noqa: BLE001 — surface HTTP / extraction errors
+                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
+                return
+            self.app.call_from_thread(self.set_status, f"installed latest: {vid}", "success")
+            self.app.call_from_thread(self.notify_data_changed)
+
+        self.set_status(f"installing latest {channel}…")
+        self.run_worker(worker, exclusive=True, thread=True)
 
     def _do_install_remote(self, channel: str, selector: str, ok: bool | None) -> None:
         if not ok:

@@ -138,6 +138,43 @@ async def test_repeated_data_bumps_dont_raise_duplicate_ids(
 
 
 @pytest.mark.asyncio
+async def test_picking_channel_auto_refreshes_remote(
+    root: Path, monkeypatch
+) -> None:
+    """Picking a channel from the Select used to do nothing; the user
+    then had to click Refresh manually. Now the Select.Changed handler
+    triggers a remote fetch so the table populates immediately.
+    """
+    from dolctl.tui.screens.versions import VersionsTab
+    from textual.widgets import DataTable, Select
+
+    add_channel(root, "vanilla", preset="dol-vanilla")
+
+    calls = {"count": 0}
+
+    def fake_list(*_args, **_kwargs):
+        calls["count"] += 1
+        return []
+
+    monkeypatch.setattr(
+        "dolctl.tui.screens.versions.list_remote_versions", fake_list
+    )
+
+    app = DolctlApp(root)
+    async with app.run_test(size=(150, 50)) as pilot:
+        await pilot.pause()
+        app.action_switch_tab("versions")
+        await pilot.pause()
+        vt = app.query_one(VersionsTab)
+        # Simulate a user pick by clicking on the select value via the
+        # Pilot API: assign the value and let Textual deliver Changed.
+        vt.query_one("#channel-select", Select).value = "vanilla"
+        for _ in range(8):
+            await pilot.pause()
+        assert calls["count"] >= 1, "channel pick did not trigger list_remote_versions"
+
+
+@pytest.mark.asyncio
 async def test_remote_refresh_surfaces_http_errors(
     root: Path, monkeypatch
 ) -> None:
