@@ -72,8 +72,6 @@ class RunTab(RefreshableTab):
         self._stop_server()
 
     def refresh_from_disk(self) -> None:
-        if not self.is_mounted:
-            return
         profiles = list_profiles(self.root)
         select = self.query_one("#profile-select", Select)
         select.set_options([(p, p) for p in profiles])
@@ -82,7 +80,7 @@ class RunTab(RefreshableTab):
 
     def _profile_name(self) -> str:
         select = self.query_one("#profile-select", Select)
-        if select.value is not Select.BLANK:
+        if not select.is_blank():
             return str(select.value)
         state = load_state(self.root)
         config = load_config(self.root)
@@ -114,7 +112,7 @@ class RunTab(RefreshableTab):
         def worker() -> None:
             try:
                 result = build_runtime(self.root, profile, clean=clean)
-            except DolCtlError as exc:
+            except Exception as exc:  # noqa: BLE001 — surface unexpected build errors
                 self.app.call_from_thread(self.set_status, f"build error: {exc}")
                 return
             self.app.call_from_thread(
@@ -152,11 +150,11 @@ class RunTab(RefreshableTab):
                     entry_name=entry,
                     allow_lan=allow_lan,
                 )
-            except DolCtlError as exc:
-                self.app.call_from_thread(self.set_status, f"error: {exc}")
-                return
             except OSError as exc:
                 self.app.call_from_thread(self.set_status, f"port error: {exc}")
+                return
+            except Exception as exc:  # noqa: BLE001 — surface unexpected errors to status
+                self.app.call_from_thread(self.set_status, f"error: {exc}")
                 return
 
             url = f"http://127.0.0.1:{actual_port}/"

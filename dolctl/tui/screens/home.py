@@ -57,9 +57,6 @@ class HomeTab(RefreshableTab):
             yield Button("Run (switch to Run tab)", id="btn-run")
 
     def refresh_from_disk(self) -> None:
-        # Defer until widgets are mounted
-        if not self.is_mounted:
-            return
         try:
             config = load_config(self.root)
             state = load_state(self.root)
@@ -124,7 +121,7 @@ class HomeTab(RefreshableTab):
         profile_name = state.active_profile or config.default_profile
         try:
             result = build_runtime(self.root, profile_name)
-        except DolCtlError as exc:
+        except Exception as exc:  # noqa: BLE001 — surface unexpected build errors
             self.app.call_from_thread(self.set_status, f"build error: {exc}")
             return
         self.app.call_from_thread(

@@ -51,6 +51,55 @@ def _read_boot_json(zip_path: Path) -> dict | None:
         return None
 
 
+def _boot_json_location(zip_path: Path) -> str | None:
+    """Return the path of boot.json inside *zip_path*, or None if absent."""
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = zf.namelist()
+    except Exception:
+        return None
+    if "boot.json" in names:
+        return "boot.json"
+    nested = [n for n in names if n.endswith("/boot.json")]
+    if not nested:
+        return None
+    # Prefer the shallowest nested path (closest to the root).
+    nested.sort(key=lambda n: n.count("/"))
+    return nested[0]
+
+
+def _flatten_mod_zip(src_zip: Path, dest_zip: Path, strip_prefix: str) -> None:
+    """Copy *src_zip* to *dest_zip*, stripping ``strip_prefix`` from every
+    member name so boot.json lands at the root of the destination zip.
+
+    The DoL ModLoader reads ``boot.json`` from the **root** of each mod
+    zip in ``window.modDataValueZipList``. Mods distributed as
+    ``<ModName-vN>.zip`` carry everything one directory deep — embedding
+    that zip verbatim makes ModLoader silently skip the mod. This helper
+    re-emits a flattened zip so ModLoader can find boot.json.
+    """
+    if not strip_prefix.endswith("/"):
+        strip_prefix = strip_prefix + "/"
+    with zipfile.ZipFile(src_zip, "r") as src, zipfile.ZipFile(
+        dest_zip, "w", zipfile.ZIP_DEFLATED
+    ) as dst:
+        for info in src.infolist():
+            name = info.filename
+            if not name.startswith(strip_prefix):
+                # Member lives outside the prefix; keep as-is so we
+                # don't drop sibling resources users may have shipped.
+                new_name = name
+            else:
+                new_name = name[len(strip_prefix):]
+                if not new_name:
+                    # Skip the synthetic top-level directory entry.
+                    continue
+            new_info = zipfile.ZipInfo(filename=new_name, date_time=info.date_time)
+            new_info.compress_type = zipfile.ZIP_DEFLATED
+            new_info.external_attr = info.external_attr
+            dst.writestr(new_info, src.read(info))
+
+
 def _slugify_mod_id(name: str, fallback_seed: str = "") -> str:
     """Convert a display name to an ASCII mod_id.
 
@@ -139,9 +188,17 @@ def add_mod_from_zip(
 
     ensure_dir(mod_dir)
 
-    # Copy the zip into the mod directory as <mod_id>.mod.zip
+    # Copy the zip into the mod directory as <mod_id>.mod.zip. If boot.json
+    # lives inside a top-level directory (common: ``ModName-v1/boot.json``
+    # in user-distributed zips), repackage it with that directory stripped
+    # so ModLoader finds boot.json at the zip root.
     dest_zip = _mod_zip_path(root, mod_id)
-    shutil.copy2(zip_path, dest_zip)
+    boot_path = _boot_json_location(zip_path)
+    if boot_path and boot_path != "boot.json":
+        strip_prefix = boot_path.rsplit("/", 1)[0]
+        _flatten_mod_zip(zip_path, dest_zip, strip_prefix)
+    else:
+        shutil.copy2(zip_path, dest_zip)
 
     mod = Mod(
         id=mod_id,

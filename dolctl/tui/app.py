@@ -48,6 +48,7 @@ class StatusBar(Label):
 class DolctlApp(App):
     CSS = """
     Screen { background: $surface; }
+    #version-row { height: 1; }
     #version-info { width: auto; padding: 0 1; color: $text-muted; }
     TabbedContent { height: 1fr; }
     """
@@ -68,7 +69,9 @@ class DolctlApp(App):
 
     # Bumped by any write operation so subscribing tabs reload from disk
     # when they next become visible. See base.py:RefreshableTab.
-    data_version: reactive[int] = reactive(0)
+    # init=False: tabs do their first refresh in on_mount; we don't want
+    # the reactive's auto-init to fire all watchers again.
+    data_version: reactive[int] = reactive(0, init=False)
 
     def __init__(self, root: Path) -> None:
         super().__init__()

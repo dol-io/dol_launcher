@@ -31,6 +31,19 @@ from ..modals import ConfirmModal, InputField, InputModal
 from .base import RefreshableTab
 
 
+class ProfileItem(ListItem):
+    """ListItem that remembers which profile name it represents.
+
+    Same rationale as channels.py:PresetItem — avoids DuplicateIds when
+    refresh_from_disk re-populates the ListView and the prior items
+    haven't been unmounted yet.
+    """
+
+    def __init__(self, profile_name: str, label: str) -> None:
+        super().__init__(Static(label))
+        self.profile_name = profile_name
+
+
 class ProfilesTab(RefreshableTab):
     """Profile management with inline mod toggle + reorder."""
 
@@ -78,8 +91,6 @@ class ProfilesTab(RefreshableTab):
                 yield table
 
     def refresh_from_disk(self) -> None:
-        if not self.is_mounted:
-            return
         state = load_state(self.root)
         active = state.active_profile
 
@@ -92,10 +103,7 @@ class ProfilesTab(RefreshableTab):
         listview.clear()
         for name in profiles:
             label = name + ("  (active)" if name == active else "")
-            listview.append(ListItem(Static(label), id=f"profile-{name}"))
-            if name == self._selected_profile:
-                # highlight after mount
-                pass
+            listview.append(ProfileItem(name, label))
 
         # Version dropdown ---------------------------------------------
         installed = list_installed(self.root)
@@ -151,23 +159,42 @@ class ProfilesTab(RefreshableTab):
     # ----- events -------------------------------------------------------
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        if event.item is None or event.item.id is None:
+        if not isinstance(event.item, ProfileItem):
             return
-        self._selected_profile = event.item.id.removeprefix("profile-")
+        self._selected_profile = event.item.profile_name
         self.refresh_from_disk()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "version-select":
             return
-        if self._selected_profile is None or event.value is Select.BLANK:
+        if self._selected_profile is None:
+            return
+        # Check event.value (captured at fire time), not select.is_blank()
+        # (reads current widget state). When refresh_from_disk runs
+        # set_options(...) immediately followed by select.value = X, the
+        # first event fires AFTER the second assignment lands, so the
+        # widget reports non-blank while event.value is still NULL — and
+        # str(Select.NULL) is the literal "Select.NULL".
+        if event.value == Select.NULL:
+            return
+        new_value = str(event.value)
+        # Avoid an infinite refresh loop: refresh_from_disk re-assigns
+        # the dropdown value, which fires this handler. Only write when
+        # the user actually changed the binding.
+        try:
+            current = get_profile(self.root, self._selected_profile).version_id
+        except DolCtlError as exc:
+            self.set_status(f"error: {exc}")
+            return
+        if current == new_value:
             return
         try:
-            set_profile_version(self.root, self._selected_profile, str(event.value))
+            set_profile_version(self.root, self._selected_profile, new_value)
         except DolCtlError as exc:
             self.set_status(f"error: {exc}")
             return
         self.set_status(
-            f"profile {self._selected_profile} now uses {event.value}"
+            f"profile {self._selected_profile} now uses {new_value}"
         )
         self.notify_data_changed()
 

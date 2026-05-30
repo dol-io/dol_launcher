@@ -109,6 +109,53 @@ class TestAddModFromZip:
         assert any("boot.json" in str(w.message) for w in captured)
         assert get_mod_info(root, mod_id).version == ""
 
+    def test_nested_boot_json_zip_is_flattened_on_import(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        """Regression: many user mods ship as ``ModName-vN.zip`` with
+        everything one directory deep. The DoL ModLoader reads
+        ``boot.json`` from the **root** of each zip in
+        ``window.modDataValueZipList``, so if we store the user's zip
+        verbatim ModLoader can't find boot.json and silently skips the
+        mod. ``add_mod_from_zip`` now repackages the zip with the
+        wrapper directory stripped.
+        """
+        wrapped = tmp_path / "NestedMod-v1.zip"
+        with zipfile.ZipFile(wrapped, "w") as zf:
+            zf.writestr(
+                "NestedMod-v1/boot.json",
+                json.dumps({"name": "NestedMod", "version": "1.0"}),
+            )
+            zf.writestr("NestedMod-v1/script.js", "console.log(1)")
+            zf.writestr("NestedMod-v1/data/x.twee", ":: Start\nhi")
+
+        mod_id = add_mod_from_zip(root, str(wrapped))
+        stored = root / "mods" / mod_id / f"{mod_id}.mod.zip"
+        with zipfile.ZipFile(stored) as zf:
+            names = set(zf.namelist())
+        assert "boot.json" in names, (
+            f"boot.json must be at the zip root for ModLoader to find it; "
+            f"stored entries: {sorted(names)}"
+        )
+        # Sibling files should be flattened too, not lost
+        assert "script.js" in names
+        assert "data/x.twee" in names
+        # The wrapper directory must not survive
+        assert not any(n.startswith("NestedMod-v1/") for n in names)
+
+    def test_already_root_boot_json_is_copied_verbatim(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        """Mods with boot.json already at the root must be copied byte-for-byte
+        (no needless repackage, which would change the sha256)."""
+        src = tmp_path / "a.mod.zip"
+        with zipfile.ZipFile(src, "w") as zf:
+            zf.writestr("boot.json", json.dumps({"name": "A", "version": "1"}))
+            zf.writestr("script.js", "x")
+        add_mod_from_zip(root, str(src))
+        stored = root / "mods" / "a" / "a.mod.zip"
+        assert stored.read_bytes() == src.read_bytes()
+
     def test_list_and_remove(self, root: Path, make_mod_zip) -> None:
         zip_a = make_mod_zip("a.mod.zip", boot={"name": "A", "version": "1"})
         zip_b = make_mod_zip("b.mod.zip", boot={"name": "B", "version": "1"})

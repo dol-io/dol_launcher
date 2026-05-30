@@ -12,6 +12,19 @@ from ..modals import ConfirmModal, InputField, InputModal
 from .base import RefreshableTab
 
 
+class PresetItem(ListItem):
+    """ListItem that remembers which preset key it represents.
+
+    We can't use widget ``id`` for this because ``refresh_from_disk``
+    re-populates the ListView, and Textual's clear() is async — adding
+    items with the same id during the same tick raises DuplicateIds.
+    """
+
+    def __init__(self, preset_key: str, label: str) -> None:
+        super().__init__(Static(label))
+        self.preset_key = preset_key
+
+
 class ChannelsTab(RefreshableTab):
     DEFAULT_CSS = """
     ChannelsTab #cols { height: 1fr; }
@@ -39,8 +52,6 @@ class ChannelsTab(RefreshableTab):
             yield Button("Remove", id="btn-remove", variant="error")
 
     def refresh_from_disk(self) -> None:
-        if not self.is_mounted:
-            return
         table = self.query_one("#channels-table", DataTable)
         table.clear()
         for name, cfg in list_channels(self.root):
@@ -49,7 +60,7 @@ class ChannelsTab(RefreshableTab):
         presets.clear()
         for key, preset in sorted(PRESETS.items()):
             description = f"{key}  ({preset.provider}: {preset.repo})"
-            presets.append(ListItem(Static(description), id=f"preset-{key}"))
+            presets.append(PresetItem(key, description))
 
     # ----- helpers ------------------------------------------------------
 
@@ -63,9 +74,9 @@ class ChannelsTab(RefreshableTab):
     def _selected_preset(self) -> str | None:
         listview = self.query_one("#presets-list", ListView)
         item = listview.highlighted_child
-        if item is None or item.id is None:
-            return None
-        return item.id.removeprefix("preset-")
+        if isinstance(item, PresetItem):
+            return item.preset_key
+        return None
 
     # ----- button handlers ---------------------------------------------
 

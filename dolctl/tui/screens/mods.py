@@ -30,8 +30,6 @@ class ModsTab(RefreshableTab):
             yield Button("Remove", id="btn-remove", variant="error")
 
     def refresh_from_disk(self) -> None:
-        if not self.is_mounted:
-            return
         table = self.query_one("#mods-table", DataTable)
         table.clear()
         for mod in list_mods(self.root):
@@ -92,7 +90,7 @@ class ModsTab(RefreshableTab):
                 installed = add_mod_from_zip(
                     self.root, path_or_url, mod_id=mod_id, force=force
                 )
-            except DolCtlError as exc:
+            except Exception as exc:  # noqa: BLE001 — surface HTTP / zip errors
                 self.app.call_from_thread(self.set_status, f"error: {exc}")
                 return
             self.app.call_from_thread(

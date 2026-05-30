@@ -4,6 +4,7 @@ import pytest
 
 from core.models import RemoteVersion
 from core.versions import (
+    _find_entry_html,
     _make_version_id,
     _normalize_id,
     _resolve_selector,
@@ -88,3 +89,31 @@ class TestMakeVersionId:
 
     def test_idempotent_when_already_prefixed(self) -> None:
         assert _make_version_id("vanilla", "vanilla-0.5.3") == "vanilla-0.5.3"
+
+
+class TestFindEntryHtml:
+    """Regression: the DoL+ModLoader build ships two entry HTMLs at the
+    zip root — ``...mod.html`` (standard) and ``...mod-polyfill.html``
+    (legacy browser fallback). A plain alphabetical sort picks the
+    polyfill because ``-`` (0x2d) < ``.`` (0x2e). The resulting manifest
+    entry is the polyfill build, which most users don't want — and on
+    old installs whose manifest still points at the polyfill, mod
+    injection lands in a file the user is unlikely to open."""
+
+    def test_prefers_non_polyfill_when_both_present(self, tmp_path) -> None:
+        (tmp_path / "Degrees of Lewdity VERSION.html.sc2patch.html.mod-polyfill.html").write_text("x")
+        (tmp_path / "Degrees of Lewdity VERSION.html.sc2patch.html.mod.html").write_text("x")
+        assert _find_entry_html(tmp_path) == (
+            "Degrees of Lewdity VERSION.html.sc2patch.html.mod.html"
+        )
+
+    def test_index_html_still_wins(self, tmp_path) -> None:
+        (tmp_path / "index.html").write_text("x")
+        (tmp_path / "alt.html").write_text("x")
+        assert _find_entry_html(tmp_path) == "index.html"
+
+    def test_demotes_debug_variant(self, tmp_path) -> None:
+        (tmp_path / "main.html").write_text("x")
+        (tmp_path / "a-debug.html").write_text("x")
+        # debug is demoted even though it would otherwise sort first
+        assert _find_entry_html(tmp_path) == "main.html"

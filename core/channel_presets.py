@@ -33,10 +33,10 @@ PRESETS: dict[str, ChannelPreset] = {
     ),
     "dol-modloader": ChannelPreset(
         provider="github",
-        repo="Lyoko-Jeremie/sugarcube-2-ModLoader",
-        # ModLoader-flavoured DoL bundles; filename pattern varies by
-        # release, so the regex is intentionally a touch loose.
-        asset_regex=r"DoL-ModLoader.*\.zip",
+        repo="Lyoko-Jeremie/DoLModLoaderBuild",
+        # Each release ships ``DoL-ModLoader-<modloader-ver>-dol-<game-ver>-<sha>.zip``
+        # plus an image pack mod we don't want to install as the game.
+        asset_regex=r"DoL-ModLoader-.*\.zip",
         description="DoL with the SugarCube-2 ModLoader pre-applied.",
     ),
 }

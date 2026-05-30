@@ -57,8 +57,6 @@ class VersionsTab(RefreshableTab):
             yield Button("Remove", id="btn-remove", variant="error")
 
     def refresh_from_disk(self) -> None:
-        if not self.is_mounted:
-            return
         # Installed
         table = self.query_one("#installed-table", DataTable)
         table.clear()
@@ -88,7 +86,7 @@ class VersionsTab(RefreshableTab):
 
     def _selected_channel(self) -> str | None:
         select = self.query_one("#channel-select", Select)
-        if select.value is Select.BLANK:
+        if select.is_blank():
             return None
         return str(select.value)
 
@@ -119,7 +117,7 @@ class VersionsTab(RefreshableTab):
         def worker() -> None:
             try:
                 versions = list_remote_versions(self.root, channel, refresh=True)
-            except DolCtlError as exc:
+            except Exception as exc:  # noqa: BLE001 — surface HTTP / network errors to user
                 self.app.call_from_thread(self.set_status, f"error: {exc}")
                 return
             self.app.call_from_thread(self._fill_remote_table, channel, versions)
@@ -156,7 +154,7 @@ class VersionsTab(RefreshableTab):
                     values["channel"],
                     force=force,
                 )
-            except DolCtlError as exc:
+            except Exception as exc:  # noqa: BLE001 — surface filesystem / extraction errors
                 self.app.call_from_thread(self.set_status, f"error: {exc}")
                 return
             self.app.call_from_thread(self.set_status, f"installed {vid}")
@@ -188,7 +186,7 @@ class VersionsTab(RefreshableTab):
                     values["channel"],
                     force=force,
                 )
-            except DolCtlError as exc:
+            except Exception as exc:  # noqa: BLE001
                 self.app.call_from_thread(self.set_status, f"error: {exc}")
                 return
             self.app.call_from_thread(self.set_status, f"installed {vid}")
@@ -221,7 +219,7 @@ class VersionsTab(RefreshableTab):
         def worker() -> None:
             try:
                 vid = install_from_remote(self.root, channel, selector)
-            except DolCtlError as exc:
+            except Exception as exc:  # noqa: BLE001 — surface HTTP / extraction errors
                 self.app.call_from_thread(self.set_status, f"error: {exc}")
                 return
             self.app.call_from_thread(self.set_status, f"installed {vid}")

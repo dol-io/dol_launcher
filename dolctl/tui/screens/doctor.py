@@ -88,8 +88,6 @@ class DoctorTab(RefreshableTab):
             yield Button("Re-run", id="btn-rerun", variant="primary")
 
     def refresh_from_disk(self) -> None:
-        if not self.is_mounted:
-            return
         results = _run_checks(self.root)
         body = "\n".join(f"{c.symbol} {c.note}" for c in results)
         self.query_one("#check-list", Static).update(body or "(no checks ran)")

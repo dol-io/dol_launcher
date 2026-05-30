@@ -26,6 +26,24 @@ from core.models import (
 import providers as _providers
 
 
+# Substrings in HTML filenames that signal a fallback / non-primary
+# variant. The DoL+ModLoader build, for example, ships both
+# ``...mod.html`` (the standard modern entry) and
+# ``...mod-polyfill.html`` (a fatter compatibility build for legacy
+# browsers). Both work, but most users want the standard one — and a
+# naive alphabetical sort picks the polyfill (``-`` < ``.``).
+_ENTRY_HTML_DEMOTE = ("polyfill", "debug", "test")
+
+
+def _entry_html_score(name: str) -> tuple[int, int, str]:
+    """Lower is better. Demote names containing fallback markers; break
+    ties by preferring shorter, then lexicographic, filenames.
+    """
+    lower = name.lower()
+    demotion = sum(1 for marker in _ENTRY_HTML_DEMOTE if marker in lower)
+    return (demotion, len(name), name)
+
+
 def _find_entry_html(directory: Path) -> str:
     """Find the main HTML file in the root of a game directory.
 
@@ -36,9 +54,12 @@ def _find_entry_html(directory: Path) -> str:
     if (directory / "index.html").exists():
         return "index.html"
     html_files = sorted(
-        f.name
-        for f in directory.iterdir()
-        if f.is_file() and f.suffix.lower() == ".html"
+        (
+            f.name
+            for f in directory.iterdir()
+            if f.is_file() and f.suffix.lower() == ".html"
+        ),
+        key=_entry_html_score,
     )
     if html_files:
         return html_files[0]

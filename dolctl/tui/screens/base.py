@@ -22,12 +22,17 @@ class RefreshableTab(Container):
     DEFAULT_CSS = """
     RefreshableTab {
         padding: 1 2;
+        overflow-y: auto;
     }
     """
 
     def on_mount(self) -> None:
         self.refresh_from_disk()
-        self.watch(self.app, "data_version", lambda _new: self.refresh_from_disk())
+        # init=False so the watch doesn't fire an immediate second refresh
+        # (we already called refresh_from_disk above).
+        self.watch(
+            self.app, "data_version", lambda _new: self.refresh_from_disk(), init=False
+        )
 
     def refresh_from_disk(self) -> None:
         """Override to reload widget state from on-disk config."""
