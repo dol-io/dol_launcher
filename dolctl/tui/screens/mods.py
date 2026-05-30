@@ -2,30 +2,44 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Button, DataTable, Static
+from textual.widgets import Button, Checkbox, DataTable, Input, Static
 
 from core.mods import add_mod_from_zip, get_mod_info, list_mods, remove_mod
 from core.models import DolCtlError
 from infra.net import is_url
 
-from ..modals import ConfirmModal, InfoModal, InputField, InputModal
+from ..modals import ConfirmModal, InfoModal
 from .base import RefreshableTab, make_progress_reporter
 
 
 class ModsTab(RefreshableTab):
     DEFAULT_CSS = """
     ModsTab DataTable { height: 1fr; }
+    ModsTab #add-row { height: auto; padding-bottom: 1; }
+    ModsTab #add-row Input { width: 1fr; margin-right: 1; }
+    ModsTab #add-row #mod-id { width: 24; }
+    ModsTab #add-row Checkbox { width: auto; margin-right: 1; }
+    ModsTab #add-row Button { width: auto; }
     ModsTab #actions { height: auto; padding-top: 1; }
     ModsTab #actions Button { margin-right: 1; }
     """
 
     def compose(self) -> ComposeResult:
         yield Static("[b]Installed mods[/b]")
+        # Inline add form — typing the path/URL and pressing Enter (or
+        # clicking Add) imports the mod without a modal round-trip.
+        with Horizontal(id="add-row"):
+            yield Input(
+                placeholder="path to .mod.zip or https://… (Enter to add)",
+                id="add-input",
+            )
+            yield Input(placeholder="override id (optional)", id="mod-id")
+            yield Checkbox("force", id="force")
+            yield Button("Add", id="btn-add", variant="primary")
         table = DataTable(id="mods-table", cursor_type="row")
         table.add_columns("id", "name", "version", "author", "source")
         yield table
         with Horizontal(id="actions"):
-            yield Button("Add (path or URL)", id="btn-add", variant="primary")
             yield Button("Info", id="btn-info")
             yield Button("Remove", id="btn-remove", variant="error")
 
@@ -58,32 +72,18 @@ class ModsTab(RefreshableTab):
         elif bid == "btn-remove":
             self._remove()
 
-    def _add(self) -> None:
-        fields = [
-            InputField(
-                "path_or_url",
-                "Path to .mod.zip or URL",
-                placeholder="/abs/path/foo.mod.zip  or  https://...",
-                required=True,
-            ),
-            InputField(
-                "mod_id",
-                "Override mod id (optional)",
-                placeholder="(leave empty to derive from boot.json)",
-            ),
-            InputField("force", "Force overwrite (y/n)", default="n"),
-        ]
-        self.app.push_screen(
-            InputModal("Add mod", fields),
-            self._do_add,
-        )
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Pressing Enter inside the path/URL field triggers Add.
+        if event.input.id in {"add-input", "mod-id"}:
+            self._add()
 
-    def _do_add(self, values) -> None:
-        if values is None:
+    def _add(self) -> None:
+        path_or_url = self.query_one("#add-input", Input).value.strip()
+        if not path_or_url:
+            self.set_status("type a path or URL to add", "warn")
             return
-        path_or_url = values["path_or_url"]
-        force = values["force"].lower() in {"y", "yes", "true", "1"}
-        mod_id = values["mod_id"] or None
+        mod_id = self.query_one("#mod-id", Input).value.strip() or None
+        force = self.query_one("#force", Checkbox).value
 
         url_download = is_url(path_or_url)
         progress = (
@@ -102,13 +102,23 @@ class ModsTab(RefreshableTab):
                 return
             self.app.call_from_thread(
                 self.set_status, f"added mod {installed}", "success")
+            self.app.call_from_thread(self._reset_add_form)
             self.app.call_from_thread(self.notify_data_changed)
 
         if url_download:
             self.set_status("downloading mod…")
-            self.run_worker(worker, exclusive=True, thread=True)
         else:
-            worker()
+            self.set_status("importing mod…")
+        # Always offload to a worker thread — even local-file imports
+        # touch the filesystem (zip read + flatten + copy) and the worker
+        # body uses ``call_from_thread`` for UI updates, which would
+        # error out if it ran on the UI thread.
+        self.run_worker(worker, exclusive=True, thread=True)
+
+    def _reset_add_form(self) -> None:
+        self.query_one("#add-input", Input).value = ""
+        self.query_one("#mod-id", Input).value = ""
+        self.query_one("#force", Checkbox).value = False
 
     def _info(self) -> None:
         mod_id = self._selected()

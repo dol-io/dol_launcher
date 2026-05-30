@@ -96,12 +96,30 @@ class ChannelsTab(RefreshableTab):
         if preset_key is None:
             self.set_status("select a preset on the right first", "warn")
             return
+        # Default name = suffix after the "dol-" provider prefix, so
+        # dol-vanilla → "vanilla", dol-modloader → "modloader".
+        default_name = preset_key.split("-", 1)[-1]
+        # Fast path: if the default name doesn't clash with an existing
+        # channel, add directly with no modal.
+        existing = {name for name, _ in list_channels(self.root)}
+        if default_name not in existing:
+            try:
+                add_channel(self.root, default_name, preset=preset_key)
+            except DolCtlError as exc:
+                self.set_status(f"error: {exc}", "error")
+                return
+            self.set_status(
+                f"added channel {default_name} (preset {preset_key})", "success"
+            )
+            self.notify_data_changed()
+            return
+        # Name clash: ask for an alternative name.
         fields = [
             InputField(
                 "name",
-                "Channel name",
-                placeholder="e.g. vanilla",
-                default=preset_key.split("-", 1)[-1],
+                "Channel name (the default is taken)",
+                placeholder=f"e.g. {default_name}-2",
+                default=f"{default_name}-2",
                 required=True,
             ),
         ]

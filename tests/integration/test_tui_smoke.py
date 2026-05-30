@@ -138,6 +138,61 @@ async def test_repeated_data_bumps_dont_raise_duplicate_ids(
 
 
 @pytest.mark.asyncio
+async def test_inline_mod_add_imports_without_modal(
+    root: Path, make_mod_zip
+) -> None:
+    """ModsTab now has an inline form (path/URL Input, optional id, force
+    Checkbox, Add button) instead of pushing a modal. Typing a path and
+    pressing the Add button should import the mod, refresh the table,
+    and clear the form."""
+    from dolctl.tui.screens.mods import ModsTab
+    from textual.widgets import Checkbox, DataTable, Input
+
+    mod_zip = make_mod_zip("inline.mod.zip", boot={"name": "Inline", "version": "1"})
+
+    app = DolctlApp(root)
+    async with app.run_test(size=(150, 50)) as pilot:
+        await pilot.pause()
+        app.action_switch_tab("mods")
+        await pilot.pause()
+        mt = app.query_one(ModsTab)
+        mt.query_one("#add-input", Input).value = str(mod_zip)
+        await pilot.pause()
+        mt._add()  # exercise the same code path the button + Enter use
+        for _ in range(5):
+            await pilot.pause()
+        rows = mt.query_one("#mods-table", DataTable).row_count
+        assert rows == 1, f"expected the import to land in the table, got {rows} rows"
+        # Form should clear after a successful add
+        assert mt.query_one("#add-input", Input).value == ""
+        assert mt.query_one("#mod-id", Input).value == ""
+        assert mt.query_one("#force", Checkbox).value is False
+
+
+@pytest.mark.asyncio
+async def test_add_preset_with_no_clash_skips_modal(root: Path) -> None:
+    """ChannelsTab now adds a preset directly when its derived default
+    name doesn't clash with an existing channel — no modal required."""
+    from dolctl.tui.screens.channels import ChannelsTab
+    from textual.widgets import DataTable, ListView
+
+    app = DolctlApp(root)
+    async with app.run_test(size=(150, 50)) as pilot:
+        await pilot.pause()
+        app.action_switch_tab("channels")
+        await pilot.pause()
+        ct = app.query_one(ChannelsTab)
+        plist = ct.query_one("#presets-list", ListView)
+        plist.index = 0  # highlight first preset
+        await pilot.pause()
+        ct._add_preset()
+        await pilot.pause()
+        # No modal should be on the screen stack; the channel must be in the
+        # configured-channels table.
+        assert ct.query_one("#channels-table", DataTable).row_count == 1
+
+
+@pytest.mark.asyncio
 async def test_picking_channel_auto_refreshes_remote(
     root: Path, monkeypatch
 ) -> None:
