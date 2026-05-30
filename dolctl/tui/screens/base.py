@@ -47,8 +47,8 @@ class RefreshableTab(Container):
     def root(self) -> Path:
         return self.dolctl_app.root_path
 
-    def set_status(self, message: str) -> None:
-        self.dolctl_app.set_status(message)
+    def set_status(self, message: str, level: str = "info") -> None:
+        self.dolctl_app.set_status(message, level)
 
     def notify_data_changed(self) -> None:
         self.dolctl_app.bump_data()

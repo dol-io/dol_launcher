@@ -4,12 +4,12 @@ from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal
 from textual.widgets import Button, Static
 
-from core.build import build_runtime
 from core.models import DolCtlError
 from core.profiles import get_profile, list_profiles
 from core.root import load_config, load_state
 
 from .base import RefreshableTab
+from .run import RunTab
 
 
 def _safe_get_profile(root, name: str):
@@ -29,12 +29,11 @@ class HomeTab(RefreshableTab):
         padding-bottom: 1;
     }
     HomeTab .card {
-        border: round $primary;
+        border: round;
         padding: 1 2;
         height: auto;
     }
     HomeTab .card-title {
-        color: $primary;
         text-style: bold;
     }
     HomeTab Horizontal#actions {
@@ -53,15 +52,14 @@ class HomeTab(RefreshableTab):
             yield Static("", id="card-channels", classes="card")
             yield Static("", id="card-mods", classes="card")
         with Horizontal(id="actions"):
-            yield Button("Build", id="btn-build", variant="primary")
-            yield Button("Run (switch to Run tab)", id="btn-run")
+            yield Button("Run", id="btn-run", variant="primary")
 
     def refresh_from_disk(self) -> None:
         try:
             config = load_config(self.root)
             state = load_state(self.root)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
 
         from core.mods import list_mods
@@ -110,21 +108,8 @@ class HomeTab(RefreshableTab):
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn-build":
-            self.run_worker(self._do_build, exclusive=True, thread=True)
-        elif event.button.id == "btn-run":
+        if event.button.id == "btn-run":
+            # Hand off to RunTab (single source of truth for build + serve)
             self.dolctl_app.action_switch_tab("run")
-
-    def _do_build(self) -> None:
-        state = load_state(self.root)
-        config = load_config(self.root)
-        profile_name = state.active_profile or config.default_profile
-        try:
-            result = build_runtime(self.root, profile_name)
-        except Exception as exc:  # noqa: BLE001 — surface unexpected build errors
-            self.app.call_from_thread(self.set_status, f"build error: {exc}")
-            return
-        self.app.call_from_thread(
-            self.set_status, f"built {profile_name} → {result.output_dir}"
-        )
-        self.app.call_from_thread(self.notify_data_changed)
+            run_tab = self.app.query_one(RunTab)
+            run_tab.action_run()

@@ -110,7 +110,7 @@ class VersionsTab(RefreshableTab):
     def _refresh_remote(self) -> None:
         channel = self._selected_channel()
         if channel is None:
-            self.set_status("pick a channel first")
+            self.set_status("pick a channel first", "warn")
             return
         self.set_status(f"fetching remote versions ({channel})…")
 
@@ -118,7 +118,7 @@ class VersionsTab(RefreshableTab):
             try:
                 versions = list_remote_versions(self.root, channel, refresh=True)
             except Exception as exc:  # noqa: BLE001 — surface HTTP / network errors to user
-                self.app.call_from_thread(self.set_status, f"error: {exc}")
+                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return
             self.app.call_from_thread(self._fill_remote_table, channel, versions)
 
@@ -129,7 +129,7 @@ class VersionsTab(RefreshableTab):
         table.clear()
         for v in versions:
             table.add_row(v.id, v.published_at, v.asset_name, key=v.id)
-        self.set_status(f"loaded {len(versions)} remote version(s) for {channel}")
+        self.set_status(f"loaded {len(versions)} remote version(s) for {channel}", "success")
 
     def _install_zip(self) -> None:
         fields = [
@@ -155,9 +155,9 @@ class VersionsTab(RefreshableTab):
                     force=force,
                 )
             except Exception as exc:  # noqa: BLE001 — surface filesystem / extraction errors
-                self.app.call_from_thread(self.set_status, f"error: {exc}")
+                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return
-            self.app.call_from_thread(self.set_status, f"installed {vid}")
+            self.app.call_from_thread(self.set_status, f"installed {vid}", "success")
             self.app.call_from_thread(self.notify_data_changed)
 
         self.set_status("installing from zip…")
@@ -187,9 +187,9 @@ class VersionsTab(RefreshableTab):
                     force=force,
                 )
             except Exception as exc:  # noqa: BLE001
-                self.app.call_from_thread(self.set_status, f"error: {exc}")
+                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return
-            self.app.call_from_thread(self.set_status, f"installed {vid}")
+            self.app.call_from_thread(self.set_status, f"installed {vid}", "success")
             self.app.call_from_thread(self.notify_data_changed)
 
         self.set_status("installing from directory…")
@@ -198,11 +198,11 @@ class VersionsTab(RefreshableTab):
     def _install_remote(self) -> None:
         channel = self._selected_channel()
         if channel is None:
-            self.set_status("pick a channel first")
+            self.set_status("pick a channel first", "warn")
             return
         selector = self._selected_remote()
         if selector is None:
-            self.set_status("pick a remote version row first")
+            self.set_status("pick a remote version row first", "warn")
             return
         self.app.push_screen(
             ConfirmModal(
@@ -220,9 +220,9 @@ class VersionsTab(RefreshableTab):
             try:
                 vid = install_from_remote(self.root, channel, selector)
             except Exception as exc:  # noqa: BLE001 — surface HTTP / extraction errors
-                self.app.call_from_thread(self.set_status, f"error: {exc}")
+                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return
-            self.app.call_from_thread(self.set_status, f"installed {vid}")
+            self.app.call_from_thread(self.set_status, f"installed {vid}", "success")
             self.app.call_from_thread(self.notify_data_changed)
 
         self.set_status(f"downloading {selector}…")
@@ -231,7 +231,7 @@ class VersionsTab(RefreshableTab):
     def _use_selected(self) -> None:
         version_id = self._selected_installed()
         if version_id is None:
-            self.set_status("select an installed version first")
+            self.set_status("select an installed version first", "warn")
             return
         state = load_state(self.root)
         config = load_config(self.root)
@@ -239,15 +239,15 @@ class VersionsTab(RefreshableTab):
         try:
             set_profile_version(self.root, profile, version_id)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"profile {profile} now uses {version_id}")
+        self.set_status(f"profile {profile} now uses {version_id}", "success")
         self.notify_data_changed()
 
     def _remove_selected(self) -> None:
         version_id = self._selected_installed()
         if version_id is None:
-            self.set_status("select an installed version first")
+            self.set_status("select an installed version first", "warn")
             return
         self.app.push_screen(
             ConfirmModal(
@@ -263,12 +263,13 @@ class VersionsTab(RefreshableTab):
         try:
             affected = remove_version(self.root, version_id)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         if affected:
             self.set_status(
-                f"removed {version_id}; affected profiles: {', '.join(affected)}"
+                f"removed {version_id}; affected profiles: {', '.join(affected)}",
+                "success",
             )
         else:
-            self.set_status(f"removed {version_id}")
+            self.set_status(f"removed {version_id}", "success")
         self.notify_data_changed()

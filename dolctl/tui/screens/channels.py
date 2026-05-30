@@ -94,7 +94,7 @@ class ChannelsTab(RefreshableTab):
     def _add_preset(self) -> None:
         preset_key = self._selected_preset()
         if preset_key is None:
-            self.set_status("select a preset on the right first")
+            self.set_status("select a preset on the right first", "warn")
             return
         fields = [
             InputField(
@@ -116,9 +116,9 @@ class ChannelsTab(RefreshableTab):
         try:
             add_channel(self.root, values["name"], preset=preset_key)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"added channel {values['name']} (preset {preset_key})")
+        self.set_status(f"added channel {values['name']} (preset {preset_key})", "success")
         self.notify_data_changed()
 
     def _add_custom(self) -> None:
@@ -147,20 +147,20 @@ class ChannelsTab(RefreshableTab):
                 asset_regex=values["asset_regex"] or None,
             )
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"added channel {values['name']}")
+        self.set_status(f"added channel {values['name']}", "success")
         self.notify_data_changed()
 
     def _edit_selected(self) -> None:
         name = self._selected_channel()
         if name is None:
-            self.set_status("select a channel row first")
+            self.set_status("select a channel row first", "warn")
             return
         try:
             cfg = get_channel(self.root, name)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         fields = [
             InputField("provider", "Provider", default=cfg.provider, required=True),
@@ -184,15 +184,15 @@ class ChannelsTab(RefreshableTab):
                 asset_regex=values["asset_regex"] or None,
             )
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"updated channel {name}")
+        self.set_status(f"updated channel {name}", "success")
         self.notify_data_changed()
 
     def _remove_selected(self) -> None:
         name = self._selected_channel()
         if name is None:
-            self.set_status("select a channel row first")
+            self.set_status("select a channel row first", "warn")
             return
         self.app.push_screen(
             ConfirmModal(f"Remove channel '{name}'?", confirm_label="Remove"),
@@ -205,7 +205,7 @@ class ChannelsTab(RefreshableTab):
         try:
             remove_channel(self.root, name)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"removed channel {name}")
+        self.set_status(f"removed channel {name}", "success")
         self.notify_data_changed()

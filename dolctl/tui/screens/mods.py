@@ -91,11 +91,10 @@ class ModsTab(RefreshableTab):
                     self.root, path_or_url, mod_id=mod_id, force=force
                 )
             except Exception as exc:  # noqa: BLE001 — surface HTTP / zip errors
-                self.app.call_from_thread(self.set_status, f"error: {exc}")
+                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return
             self.app.call_from_thread(
-                self.set_status, f"added mod {installed}"
-            )
+                self.set_status, f"added mod {installed}", "success")
             self.app.call_from_thread(self.notify_data_changed)
 
         if is_url(path_or_url):
@@ -107,12 +106,12 @@ class ModsTab(RefreshableTab):
     def _info(self) -> None:
         mod_id = self._selected()
         if mod_id is None:
-            self.set_status("select a mod row first")
+            self.set_status("select a mod row first", "warn")
             return
         try:
             m = get_mod_info(self.root, mod_id)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         body = (
             f"id:          {m.id}\n"
@@ -130,7 +129,7 @@ class ModsTab(RefreshableTab):
     def _remove(self) -> None:
         mod_id = self._selected()
         if mod_id is None:
-            self.set_status("select a mod row first")
+            self.set_status("select a mod row first", "warn")
             return
         self.app.push_screen(
             ConfirmModal(f"Remove mod '{mod_id}'?", confirm_label="Remove"),
@@ -143,7 +142,7 @@ class ModsTab(RefreshableTab):
         try:
             remove_mod(self.root, mod_id)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"removed mod {mod_id}")
+        self.set_status(f"removed mod {mod_id}", "success")
         self.notify_data_changed()

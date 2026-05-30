@@ -57,13 +57,13 @@ class ProfilesTab(RefreshableTab):
     ProfilesTab DataTable { height: 1fr; }
     ProfilesTab #profile-actions { height: auto; padding-top: 1; }
     ProfilesTab #profile-actions Button { margin-right: 1; }
-    ProfilesTab #mods-help { color: $text-muted; padding-bottom: 1; }
+    ProfilesTab #mods-help { padding-bottom: 1; }
     """
 
     BINDINGS = [
-        Binding("space", "toggle_mod", "Toggle", show=False),
-        Binding("plus", "move_mod(-1)", "Move up", show=False),
-        Binding("minus", "move_mod(1)", "Move down", show=False),
+        Binding("space", "toggle_mod", "Toggle mod"),
+        Binding("plus", "move_mod(-1)", "Move up"),
+        Binding("minus", "move_mod(1)", "Move down"),
     ]
 
     _selected_profile: str | None = None
@@ -184,17 +184,18 @@ class ProfilesTab(RefreshableTab):
         try:
             current = get_profile(self.root, self._selected_profile).version_id
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         if current == new_value:
             return
         try:
             set_profile_version(self.root, self._selected_profile, new_value)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         self.set_status(
-            f"profile {self._selected_profile} now uses {new_value}"
+            f"profile {self._selected_profile} now uses {new_value}",
+            "success",
         )
         self.notify_data_changed()
 
@@ -224,30 +225,30 @@ class ProfilesTab(RefreshableTab):
         try:
             create_profile(self.root, values["name"])
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         self._selected_profile = values["name"]
-        self.set_status(f"created profile {values['name']}")
+        self.set_status(f"created profile {values['name']}", "success")
         self.notify_data_changed()
 
     def _use_selected(self) -> None:
         if self._selected_profile is None:
-            self.set_status("select a profile first")
+            self.set_status("select a profile first", "warn")
             return
         try:
             set_active_profile(self.root, self._selected_profile)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"active profile: {self._selected_profile}")
+        self.set_status(f"active profile: {self._selected_profile}", "success")
         self.notify_data_changed()
 
     def _delete_selected(self) -> None:
         if self._selected_profile is None:
-            self.set_status("select a profile first")
+            self.set_status("select a profile first", "warn")
             return
         if self._selected_profile == "default":
-            self.set_status("refusing to delete the 'default' profile")
+            self.set_status("refusing to delete the 'default' profile", "warn")
             return
         name = self._selected_profile
         self.app.push_screen(
@@ -264,10 +265,10 @@ class ProfilesTab(RefreshableTab):
         try:
             shutil.rmtree(path)
         except OSError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         self._selected_profile = None
-        self.set_status(f"deleted profile {name}")
+        self.set_status(f"deleted profile {name}", "success")
         self.notify_data_changed()
 
     # ----- mod toggle / reorder ----------------------------------------
@@ -288,17 +289,17 @@ class ProfilesTab(RefreshableTab):
         try:
             profile = get_profile(self.root, self._selected_profile)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         try:
             if mid in profile.mod_order:
                 remove_mod_from_profile(self.root, self._selected_profile, mid)
-                self.set_status(f"disabled {mid}")
+                self.set_status(f"disabled {mid}", "success")
             else:
                 add_mod_to_profile(self.root, self._selected_profile, mid)
-                self.set_status(f"enabled {mid}")
+                self.set_status(f"enabled {mid}", "success")
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
         self.notify_data_changed()
 
@@ -314,7 +315,7 @@ class ProfilesTab(RefreshableTab):
             return
         order = list(profile.mod_order)
         if mid not in order:
-            self.set_status("only enabled mods can be reordered")
+            self.set_status("only enabled mods can be reordered", "warn")
             return
         idx = order.index(mid)
         new_idx = max(0, min(len(order) - 1, idx + delta))
@@ -324,7 +325,7 @@ class ProfilesTab(RefreshableTab):
         try:
             reorder_mods(self.root, self._selected_profile, order)
         except DolCtlError as exc:
-            self.set_status(f"error: {exc}")
+            self.set_status(f"error: {exc}", "error")
             return
-        self.set_status(f"moved {mid} to position {new_idx + 1}")
+        self.set_status(f"moved {mid} to position {new_idx + 1}", "success")
         self.notify_data_changed()

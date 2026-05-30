@@ -17,6 +17,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Label, TabbedContent, TabPane
 
 from .. import __version__
+from .modals import InfoModal
 from .screens.channels import ChannelsTab
 from .screens.doctor import DoctorTab
 from .screens.home import HomeTab
@@ -29,27 +30,39 @@ from .screens.versions import VersionsTab
 _TAB_IDS = ("home", "channels", "versions", "mods", "profiles", "run", "doctor")
 
 
+_LEVEL_TAG = {
+    "info": "",
+    "success": "[green]",
+    "warn": "[yellow]",
+    "error": "[red]",
+}
+
+
 class StatusBar(Label):
-    """One-line status / last-action display above the footer."""
+    """One-line status / last-action display above the footer.
+
+    The most recent message wins (single line), but the level
+    classifies it: success/warn/error get an ANSI colour tag so the
+    user can tell at a glance whether an operation succeeded.
+    """
 
     DEFAULT_CSS = """
     StatusBar {
         height: 1;
         padding: 0 1;
-        background: $panel;
-        color: $text-muted;
     }
     """
 
-    def set_status(self, message: str) -> None:
-        self.update(message)
+    def set_status(self, message: str, level: str = "info") -> None:
+        tag = _LEVEL_TAG.get(level, "")
+        close = "[/]" if tag else ""
+        self.update(f"{tag}{message}{close}")
 
 
 class DolctlApp(App):
     CSS = """
-    Screen { background: $surface; }
     #version-row { height: 1; }
-    #version-info { width: auto; padding: 0 1; color: $text-muted; }
+    #version-info { width: auto; padding: 0 1; }
     TabbedContent { height: 1fr; }
     """
 
@@ -84,19 +97,19 @@ class DolctlApp(App):
         with Horizontal(id="version-row"):
             yield Label(f"dolctl v{__version__}", id="version-info")
         with TabbedContent(initial="home", id="tabs"):
-            with TabPane("Home", id="home"):
+            with TabPane("1·Home", id="home"):
                 yield HomeTab(id="home-tab")
-            with TabPane("Channels", id="channels"):
+            with TabPane("2·Channels", id="channels"):
                 yield ChannelsTab(id="channels-tab")
-            with TabPane("Versions", id="versions"):
+            with TabPane("3·Versions", id="versions"):
                 yield VersionsTab(id="versions-tab")
-            with TabPane("Mods", id="mods"):
+            with TabPane("4·Mods", id="mods"):
                 yield ModsTab(id="mods-tab")
-            with TabPane("Profiles", id="profiles"):
+            with TabPane("5·Profiles", id="profiles"):
                 yield ProfilesTab(id="profiles-tab")
-            with TabPane("Run", id="run"):
+            with TabPane("6·Run", id="run"):
                 yield RunTab(id="run-tab")
-            with TabPane("Doctor", id="doctor"):
+            with TabPane("7·Doctor", id="doctor"):
                 yield DoctorTab(id="doctor-tab")
         yield StatusBar("ready", id="status")
         yield Footer()
@@ -119,15 +132,29 @@ class DolctlApp(App):
         self.set_status("refreshed")
 
     def action_help(self) -> None:
-        self.set_status(
-            "keys: 1-7 switch tab · F5 refresh · q quit · "
-            "(tab-specific shortcuts shown at bottom)"
+        body = (
+            "Global\n"
+            "  1-7       switch tab (numbers shown in tab labels)\n"
+            "  r / F5    refresh active tab from disk\n"
+            "  ?         this help\n"
+            "  q         quit\n"
+            "\n"
+            "Profiles tab\n"
+            "  space     toggle mod enabled/disabled (on selected row)\n"
+            "  +         move enabled mod up in load order\n"
+            "  -         move enabled mod down in load order\n"
+            "\n"
+            "Most tabs\n"
+            "  Tab / Shift+Tab     move focus between controls\n"
+            "  Enter               activate the focused button\n"
+            "  Esc                 close the current modal\n"
         )
+        self.push_screen(InfoModal("Keyboard shortcuts", body))
 
     # ----- public helpers used by tabs ----------------------------------
 
-    def set_status(self, message: str) -> None:
-        self.query_one("#status", StatusBar).set_status(message)
+    def set_status(self, message: str, level: str = "info") -> None:
+        self.query_one("#status", StatusBar).set_status(message, level)
 
     def bump_data(self) -> None:
         """Notify all tabs that on-disk state changed."""

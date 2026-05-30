@@ -95,4 +95,4 @@ class DoctorTab(RefreshableTab):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-rerun":
             self.refresh_from_disk()
-            self.set_status("diagnostics refreshed")
+            self.set_status("diagnostics refreshed", "success")

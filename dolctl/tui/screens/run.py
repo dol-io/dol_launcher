@@ -25,12 +25,12 @@ class RunTab(RefreshableTab):
     DEFAULT_CSS = """
     RunTab #top { height: auto; padding-bottom: 1; }
     RunTab #top > Vertical { padding-right: 2; }
-    RunTab #top Static.col-title { color: $primary; text-style: bold; }
+    RunTab #top Static.col-title { text-style: bold; }
     RunTab #opts { height: auto; }
     RunTab #opts Input { width: 20; }
     RunTab #actions { height: auto; padding-top: 1; }
     RunTab #actions Button { margin-right: 1; }
-    RunTab RichLog { height: 1fr; border: round $primary; }
+    RunTab RichLog { height: 1fr; border: round; }
     """
 
     _server = None
@@ -101,9 +101,13 @@ class RunTab(RefreshableTab):
         if bid == "btn-build":
             self._build()
         elif bid == "btn-run":
-            self._run()
+            self.action_run()
         elif bid == "btn-stop":
             self._stop_server()
+
+    def action_run(self) -> None:
+        """Public entry point so other tabs (Home) can trigger Run."""
+        self._run()
 
     def _build(self) -> None:
         profile = self._profile_name()
@@ -113,11 +117,10 @@ class RunTab(RefreshableTab):
             try:
                 result = build_runtime(self.root, profile, clean=clean)
             except Exception as exc:  # noqa: BLE001 — surface unexpected build errors
-                self.app.call_from_thread(self.set_status, f"build error: {exc}")
+                self.app.call_from_thread(self.set_status, f"build error: {exc}", "error")
                 return
             self.app.call_from_thread(
-                self.set_status, f"built {profile} → {result.output_dir}"
-            )
+                self.set_status, f"built {profile} → {result.output_dir}", "success")
             self.app.call_from_thread(self.notify_data_changed)
 
         self.set_status(f"building {profile}…")
@@ -125,7 +128,7 @@ class RunTab(RefreshableTab):
 
     def _run(self) -> None:
         if self._server is not None:
-            self.set_status("server already running; press Stop first")
+            self.set_status("server already running; press Stop first", "warn")
             return
 
         profile_name = self._profile_name()
@@ -151,10 +154,10 @@ class RunTab(RefreshableTab):
                     allow_lan=allow_lan,
                 )
             except OSError as exc:
-                self.app.call_from_thread(self.set_status, f"port error: {exc}")
+                self.app.call_from_thread(self.set_status, f"port error: {exc}", "error")
                 return
             except Exception as exc:  # noqa: BLE001 — surface unexpected errors to status
-                self.app.call_from_thread(self.set_status, f"error: {exc}")
+                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
                 return
 
             url = f"http://127.0.0.1:{actual_port}/"
@@ -172,7 +175,7 @@ class RunTab(RefreshableTab):
         self.query_one("#btn-run", Button).disabled = True
         self.query_one("#btn-build", Button).disabled = True
         self.query_one("#btn-stop", Button).disabled = False
-        self.set_status(f"serving {url}")
+        self.set_status(f"serving {url}", "success")
         self.query_one("#log", RichLog).write(f"Serving {url}")
         if not no_browser:
             webbrowser.open(url)
@@ -206,5 +209,5 @@ class RunTab(RefreshableTab):
             self.query_one("#btn-stop", Button).disabled = True
         except Exception:
             return
-        self.set_status("server stopped")
+        self.set_status("server stopped", "success")
         self.query_one("#log", RichLog).write("Server stopped")

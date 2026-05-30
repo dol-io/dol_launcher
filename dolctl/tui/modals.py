@@ -17,8 +17,7 @@ class ConfirmModal(ModalScreen[bool]):
     ConfirmModal > Vertical {
         width: 60;
         height: auto;
-        border: thick $primary;
-        background: $surface;
+        border: thick;
         padding: 1 2;
     }
     ConfirmModal Horizontal { height: auto; align: center middle; padding-top: 1; }
@@ -68,8 +67,7 @@ class InputModal(ModalScreen[dict[str, str] | None]):
     InputModal > Vertical {
         width: 70;
         height: auto;
-        border: thick $primary;
-        background: $surface;
+        border: thick;
         padding: 1 2;
     }
     InputModal Label.field-label {
@@ -144,8 +142,7 @@ class InfoModal(ModalScreen[None]):
         width: 70;
         height: auto;
         max-height: 80%;
-        border: thick $primary;
-        background: $surface;
+        border: thick;
         padding: 1 2;
     }
     InfoModal Horizontal { height: auto; align: center middle; padding-top: 1; }
