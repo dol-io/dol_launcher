@@ -104,9 +104,12 @@ Mod 来源目录：
 | `doli` | Degrees of Lewdity Intelligence |
 | `cheat-lyra` | Lyra 作弊与成就解锁 |
 | `combat-status-display-lyra` | Lyra 敌人 HP/AP 显示 |
-| `au-female-model-058` | 适配 DoL 0.5.8.x 的 AU 女性模型 |
-| `au-male-model-058` | 适配 DoL 0.5.8.x 的 AU 男性模型 |
-| `au-androgynous-model-058` | 适配 DoL 0.5.8.x 的 AU 中性模型 |
+| `au-female-v0.8.7-dol-0.5.8.9` | AU 女性模型 v0.8.7，适配 DoL 0.5.8.9 |
+| `au-female-v0.9.3-dol-0.5.9` | AU 女性模型 v0.9.3，适配 DoL 0.5.9 |
+| `au-male-v0.3.7-dol-0.5.8.9` | AU 男性模型 v0.3.7，适配 DoL 0.5.8.9 |
+| `au-male-v0.4.2-dol-0.5.9` | AU 男性模型 v0.4.2，适配 DoL 0.5.9 |
+| `au-androgynous-v0.0.7-dol-0.5.8.9` | AU 中性模型 v0.0.7，适配 DoL 0.5.8.9 |
+| `au-androgynous-v0.1.1-dol-0.5.9` | AU 中性模型 v0.1.1，适配 DoL 0.5.9 |
 | `ausdol-facial-expansion` | AUsDoL 面部扩展 |
 
 可以在 TUI 的 `Library → Mod sources` 选择 `Add source`，或使用 CLI：
@@ -123,9 +126,10 @@ uv run dolctl --root "$GAME_ROOT" mod remote --channel doli
 uv run dolctl --root "$GAME_ROOT" mod install latest --channel doli
 ```
 
-三个 `-058` AU 来源分别固定 female 0.8.x、male 0.3.x 和 androgynous 0.0.x；
-它们与 DoL 0.5.8.x 兼容，不会误装同一个 Release 中面向新游戏版本的资产。
-这些来源直接安装作者发布的 model zip，不会解包或二次分发 AU 图片。
+AU 来源名使用 `au-<体型>-v<AU版本>-dol-<DoL版本>`，同时保留官方发布的
+DoL 0.5.8.9 和 0.5.9 两组。每个来源精确匹配对应 model zip，不会在同一个
+Release 中误选不兼容资产。这些来源直接安装作者发布的 model zip，不会解包或
+二次分发 AU 图片。
 
 旧的 2024 `site098/mysterious` 资产已从目录移除。Lyra 会把 UCB imagepack 合并
 进完整游戏整合包，并未发布独立的 `.mod.zip`，所以

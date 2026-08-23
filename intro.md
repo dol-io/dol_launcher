@@ -198,16 +198,18 @@ rather than a remotely controlled marketplace. A fresh ROOT configures the
 BESC+UCB game build and must never enter the Mod installer. The TUI's
 **Mod sources** catalog contains only independently installable Mod archives:
 `dol-image-pack`, `dol-i18n-zh`, `doli`, `cheat-lyra`,
-`combat-status-display-lyra`, `au-female-model-058`, `au-male-model-058`,
-`au-androgynous-model-058`, and `ausdol-facial-expansion`. The AU templates
-select the official female 0.8.x, male 0.3.x, and androgynous 0.0.x model zips
-for DoL 0.5.8.x. The outdated `site098/mysterious` Release is not a reviewed
-source. Lyra currently integrates UCB into complete game archives instead of
-publishing it as a standalone Mod. The separate `dolp-mysterious-ucb`
-imagepack recipe therefore builds a local ModLoader package from DOLP's raw
-GitLab repository subtree and records the exact source commit. Compatibility-
-specific templates may intentionally narrow their asset regex; the launcher
-does not infer game and Mod compatibility.
+`combat-status-display-lyra`, the six versioned AU model sources, and
+`ausdol-facial-expansion`. AU source ids use
+`au-<body>-v<AU-version>-dol-<DoL-version>` and cover the official female,
+male, and androgynous packages for both DoL 0.5.8.9 and 0.5.9. Each template
+matches one exact official AU asset version. The outdated
+`site098/mysterious` Release is not a reviewed source. Lyra currently
+integrates UCB into complete game archives instead of publishing it as a
+standalone Mod. The separate `dolp-mysterious-ucb` imagepack recipe therefore
+builds a local ModLoader package from DOLP's raw GitLab repository subtree and
+records the exact source commit. Compatibility-specific templates may
+intentionally narrow their asset regex; the launcher does not infer game and
+Mod compatibility.
 
 `.dolctl/state.toml`:
 

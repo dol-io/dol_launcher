@@ -86,29 +86,47 @@ PRESETS: dict[str, ChannelPreset] = {
         asset_regex=r"CombatStatusDisplay-Lyra-v.*\.mod\.zip",
         description="Lyra enemy HP and AP display Mod.",
     ),
-    "au-female-model-058": ChannelPreset(
+    "au-female-v0.8.7-dol-0.5.8.9": ChannelPreset(
         kind="mod",
         provider="github",
         repo="AOKIUTAGE/UTAGEsDOL3.0",
-        # The 0.8.x line targets DoL 0.5.8.x; newer assets share this release.
-        asset_regex=r"AUfemale\.model_v0\.8\.[0-9]+\.zip",
-        description="AU female model for DoL 0.5.8.x.",
+        asset_regex=r"AUfemale\.model_v0\.8\.7\.zip",
+        description="AU female model v0.8.7 — DoL 0.5.8.9.",
     ),
-    "au-male-model-058": ChannelPreset(
+    "au-female-v0.9.3-dol-0.5.9": ChannelPreset(
         kind="mod",
         provider="github",
         repo="AOKIUTAGE/UTAGEsDOL3.0",
-        # The 0.3.x line targets DoL 0.5.8.x.
-        asset_regex=r"AUmale\.model_v0\.3\.[0-9]+\.zip",
-        description="AU male model for DoL 0.5.8.x.",
+        asset_regex=r"AUfemale\.model_v0\.9\.3\.zip",
+        description="AU female model v0.9.3 — DoL 0.5.9.",
     ),
-    "au-androgynous-model-058": ChannelPreset(
+    "au-male-v0.3.7-dol-0.5.8.9": ChannelPreset(
         kind="mod",
         provider="github",
         repo="AOKIUTAGE/UTAGEsDOL3.0",
-        # The 0.0.x line targets DoL 0.5.8.x.
-        asset_regex=r"AUandrogynous\.model_v0\.0\.[0-9]+\.zip",
-        description="AU androgynous model for DoL 0.5.8.x.",
+        asset_regex=r"AUmale\.model_v0\.3\.7\.zip",
+        description="AU male model v0.3.7 — DoL 0.5.8.9.",
+    ),
+    "au-male-v0.4.2-dol-0.5.9": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="AOKIUTAGE/UTAGEsDOL3.0",
+        asset_regex=r"AUmale\.model_v0\.4\.2\.zip",
+        description="AU male model v0.4.2 — DoL 0.5.9.",
+    ),
+    "au-androgynous-v0.0.7-dol-0.5.8.9": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="AOKIUTAGE/UTAGEsDOL3.0",
+        asset_regex=r"AUandrogynous\.model_v0\.0\.7\.zip",
+        description="AU androgynous model v0.0.7 — DoL 0.5.8.9.",
+    ),
+    "au-androgynous-v0.1.1-dol-0.5.9": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="AOKIUTAGE/UTAGEsDOL3.0",
+        asset_regex=r"AUandrogynous\.model_v0\.1\.1\.zip",
+        description="AU androgynous model v0.1.1 — DoL 0.5.9.",
     ),
     "ausdol-facial-expansion": ChannelPreset(
         kind="mod",

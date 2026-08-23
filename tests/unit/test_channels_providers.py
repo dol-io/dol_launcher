@@ -35,9 +35,12 @@ def test_channel_lifecycle_and_cache_invalidation(launcher: Launcher) -> None:
 def test_reviewed_source_templates_cover_common_game_and_mod_releases() -> None:
     presets = dict(Launcher.channel_presets())
     assert set(presets) == {
-        "au-androgynous-model-058",
-        "au-female-model-058",
-        "au-male-model-058",
+        "au-androgynous-v0.0.7-dol-0.5.8.9",
+        "au-androgynous-v0.1.1-dol-0.5.9",
+        "au-female-v0.8.7-dol-0.5.8.9",
+        "au-female-v0.9.3-dol-0.5.9",
+        "au-male-v0.3.7-dol-0.5.8.9",
+        "au-male-v0.4.2-dol-0.5.9",
         "ausdol-facial-expansion",
         "cheat-lyra",
         "combat-status-display-lyra",
@@ -57,9 +60,12 @@ def test_reviewed_source_templates_cover_common_game_and_mod_releases() -> None:
     assert presets["doli"].kind == "mod"
     assert presets["cheat-lyra"].kind == "mod"
     assert presets["combat-status-display-lyra"].kind == "mod"
-    assert presets["au-androgynous-model-058"].kind == "mod"
-    assert presets["au-female-model-058"].kind == "mod"
-    assert presets["au-male-model-058"].kind == "mod"
+    assert presets["au-androgynous-v0.0.7-dol-0.5.8.9"].kind == "mod"
+    assert presets["au-androgynous-v0.1.1-dol-0.5.9"].kind == "mod"
+    assert presets["au-female-v0.8.7-dol-0.5.8.9"].kind == "mod"
+    assert presets["au-female-v0.9.3-dol-0.5.9"].kind == "mod"
+    assert presets["au-male-v0.3.7-dol-0.5.8.9"].kind == "mod"
+    assert presets["au-male-v0.4.2-dol-0.5.9"].kind == "mod"
     assert presets["ausdol-facial-expansion"].kind == "mod"
     assert all(preset.repo != "site098/mysterious" for preset in presets.values())
 
@@ -69,9 +75,16 @@ def test_reviewed_source_templates_cover_common_game_and_mod_releases() -> None:
     }
 
     known_assets = {
-        "au-androgynous-model-058": "AUandrogynous.model_v0.0.7.zip",
-        "au-female-model-058": "AUfemale.model_v0.8.7.zip",
-        "au-male-model-058": "AUmale.model_v0.3.7.zip",
+        "au-androgynous-v0.0.7-dol-0.5.8.9": (
+            "AUandrogynous.model_v0.0.7.zip"
+        ),
+        "au-androgynous-v0.1.1-dol-0.5.9": (
+            "AUandrogynous.model_v0.1.1.zip"
+        ),
+        "au-female-v0.8.7-dol-0.5.8.9": "AUfemale.model_v0.8.7.zip",
+        "au-female-v0.9.3-dol-0.5.9": "AUfemale.model_v0.9.3.zip",
+        "au-male-v0.3.7-dol-0.5.8.9": "AUmale.model_v0.3.7.zip",
+        "au-male-v0.4.2-dol-0.5.9": "AUmale.model_v0.4.2.zip",
         "ausdol-facial-expansion": "AUsDoL.facial.expansion.mod.zip",
         "cheat-lyra": "Cheat-Lyra-v1.1.3.mod.zip",
         "combat-status-display-lyra": (
@@ -92,18 +105,20 @@ def test_reviewed_source_templates_cover_common_game_and_mod_releases() -> None:
         presets["dol-modloader-zh"].asset_regex,
         "DoL-ModLoader-0.5.11.9-v2.101.1-polyfill.zip",
     )
-    assert not re.fullmatch(
-        presets["au-female-model-058"].asset_regex,
-        "AUfemale.model_v0.9.3.zip",
-    )
-    assert not re.fullmatch(
-        presets["au-male-model-058"].asset_regex,
-        "AUmale.model_v0.4.2.zip",
-    )
-    assert not re.fullmatch(
-        presets["au-androgynous-model-058"].asset_regex,
-        "AUandrogynous.model_v0.1.1.zip",
-    )
+    wrong_assets = {
+        "au-androgynous-v0.0.7-dol-0.5.8.9": (
+            "AUandrogynous.model_v0.1.1.zip"
+        ),
+        "au-androgynous-v0.1.1-dol-0.5.9": (
+            "AUandrogynous.model_v0.0.7.zip"
+        ),
+        "au-female-v0.8.7-dol-0.5.8.9": "AUfemale.model_v0.9.3.zip",
+        "au-female-v0.9.3-dol-0.5.9": "AUfemale.model_v0.8.7.zip",
+        "au-male-v0.3.7-dol-0.5.8.9": "AUmale.model_v0.4.2.zip",
+        "au-male-v0.4.2-dol-0.5.9": "AUmale.model_v0.3.7.zip",
+    }
+    for key, asset in wrong_assets.items():
+        assert not re.fullmatch(presets[key].asset_regex, asset)
 
 
 def test_mod_preset_materialises_a_typed_channel(launcher: Launcher) -> None:
