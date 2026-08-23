@@ -82,7 +82,9 @@ class VersionsTab(RefreshableTab):
             )
         select = self.query_one("#version-source", Select)
         previous = None if select.is_blank() else str(select.value)
-        names = [name for name, _channel in snapshot.channels]
+        names = [
+            name for name, channel in snapshot.channels if channel.kind == "game"
+        ]
         select.set_options([(name, name) for name in names])
         selected: str | None = None
         if previous in names:

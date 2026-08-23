@@ -5,7 +5,13 @@ from pathlib import Path
 import providers
 
 from .channel_presets import PRESETS, get_preset
-from .models import ChannelConfig, ConflictError, NotFoundError, ValidationError
+from .models import (
+    ChannelConfig,
+    ChannelKind,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from .root import RootLayout, load_config, save_config, validate_resource_name
 
 
@@ -29,6 +35,7 @@ def _invalidate_cache(root: Path, name: str) -> None:
 def _channel_from_input(
     *,
     preset: str | None,
+    kind: ChannelKind | None,
     provider: str | None,
     repo: str | None,
     asset_regex: str | None,
@@ -42,6 +49,7 @@ def _channel_from_input(
                 f"Unknown channel preset {preset!r}; available: {known}"
             ) from exc
         channel = ChannelConfig(
+            kind=kind or template.kind,
             provider=provider or template.provider,
             repo=repo or template.repo,
             asset_regex=asset_regex or template.asset_regex,
@@ -50,6 +58,7 @@ def _channel_from_input(
         if not repo:
             raise ValidationError("A preset or GitHub repository is required")
         channel = ChannelConfig(
+            kind=kind or "game",
             provider=provider or "github",
             repo=repo,
             asset_regex=asset_regex or ChannelConfig().asset_regex,
@@ -63,6 +72,7 @@ def add_channel(
     name: str,
     *,
     preset: str | None = None,
+    kind: ChannelKind | None = None,
     provider: str | None = None,
     repo: str | None = None,
     asset_regex: str | None = None,
@@ -74,6 +84,7 @@ def add_channel(
         raise ConflictError(f"Channel already exists: {name}")
     channel = _channel_from_input(
         preset=preset,
+        kind=kind,
         provider=provider,
         repo=repo,
         asset_regex=asset_regex,
@@ -88,6 +99,7 @@ def update_channel(
     root: Path,
     name: str,
     *,
+    kind: ChannelKind | None = None,
     provider: str | None = None,
     repo: str | None = None,
     asset_regex: str | None = None,
@@ -98,6 +110,7 @@ def update_channel(
     if current is None:
         raise NotFoundError(f"Channel not found: {name}")
     updated = ChannelConfig(
+        kind=kind if kind is not None else current.kind,
         provider=provider if provider is not None else current.provider,
         repo=repo if repo is not None else current.repo,
         asset_regex=(asset_regex if asset_regex is not None else current.asset_regex),
@@ -114,6 +127,7 @@ def set_channel_fields(
     root: Path,
     name: str,
     *,
+    kind: ChannelKind | None = None,
     provider: str | None = None,
     repo: str | None = None,
     asset_regex: str | None = None,
@@ -121,6 +135,7 @@ def set_channel_fields(
     return update_channel(
         root,
         name,
+        kind=kind,
         provider=provider,
         repo=repo,
         asset_regex=asset_regex,

@@ -20,7 +20,13 @@ from .models import (
     RemoteVersion,
     RemoveResult,
 )
-from .mods import add_mod_from_zip, get_mod_info, list_mods, remove_mod
+from .mods import (
+    add_mod_from_zip,
+    get_mod_info,
+    install_mod_from_remote,
+    list_mods,
+    remove_mod,
+)
 from .profiles import (
     UNSET,
     active_profile_name,
@@ -43,6 +49,7 @@ from .versions import (
     install_from_file,
     install_from_remote,
     list_installed,
+    list_remote_mods,
     list_remote_versions,
     remove_version,
 )
@@ -213,6 +220,29 @@ class Launcher:
         return add_mod_from_zip(
             self.root,
             source,
+            mod_id,
+            force=force,
+            progress=progress,
+        )
+
+    def remote_mods(
+        self, channel: str, *, refresh: bool = False
+    ) -> list[RemoteVersion]:
+        return list_remote_mods(self.root, channel, refresh=refresh)
+
+    def install_remote_mod(
+        self,
+        channel: str,
+        selector: str = "latest",
+        *,
+        mod_id: str | None = None,
+        force: bool = False,
+        progress: ProgressCallback | None = None,
+    ) -> str:
+        return install_mod_from_remote(
+            self.root,
+            channel,
+            selector,
             mod_id,
             force=force,
             progress=progress,

@@ -14,6 +14,7 @@ from infra.fs import (
     replace_directory,
     staging_directory,
 )
+from infra.toml import write_toml
 
 
 def test_initialise_creates_compatible_layout(launcher: Launcher) -> None:
@@ -23,7 +24,25 @@ def test_initialise_creates_compatible_layout(launcher: Launcher) -> None:
     assert (root / "profiles" / "default" / "profile.toml").is_file()
     config = load_config(root)
     assert set(config.channels) == {"modloader"}
+    assert config.channels["modloader"].kind == "game"
     assert config.default_port == 8799
+
+
+def test_legacy_channel_without_kind_defaults_to_game(launcher: Launcher) -> None:
+    write_toml(
+        launcher.root / ".dolctl" / "config.toml",
+        {
+            "schema_version": 1,
+            "channels": {
+                "legacy": {
+                    "provider": "github",
+                    "repo": "owner/repository",
+                    "asset_regex": r".*\.zip",
+                }
+            },
+        },
+    )
+    assert load_config(launcher.root).channels["legacy"].kind == "game"
 
 
 def test_resolve_root_walks_parents(

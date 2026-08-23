@@ -43,6 +43,8 @@ async def test_app_mounts_and_navigates_the_three_workspaces(
             app.query_one(InstancesTab).query_one("#enabled-mods", DataTable).row_count
             == 1
         )
+        enabled_mods = app.query_one("#enabled-mods", DataTable)
+        assert enabled_mods.max_scroll_y == 0
 
         await pilot.press("2")
         assert app.query_one("#library-page").has_class("-current")
@@ -98,6 +100,27 @@ async def test_play_stays_usable_in_an_80_column_terminal(
 
 
 @pytest.mark.asyncio
+async def test_enabled_mods_expand_into_the_page_scroll(
+    launcher: Launcher, make_mod_zip
+) -> None:
+    for index in range(12):
+        mod_id = launcher.install_mod(
+            str(make_mod_zip(f"mod-{index}.zip", mod_name=f"Mod {index}"))
+        )
+        launcher.enable_mod("default", mod_id)
+
+    app = DolctlApp(launcher)
+    async with app.run_test(size=(100, 24)) as pilot:
+        await pilot.pause()
+        table = app.query_one("#enabled-mods", DataTable)
+        detail = app.query_one("#instance-detail")
+
+        assert table.row_count == 12
+        assert table.max_scroll_y == 0
+        assert detail.max_scroll_y > 0
+
+
+@pytest.mark.asyncio
 async def test_tui_keeps_native_ansi_slots_at_runtime(
     launcher: Launcher, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -143,6 +166,20 @@ async def test_workspace_shortcuts_do_not_capture_input_text(
 
         assert source.value == "2q"
         assert app.query_one("#library-page").has_class("-current")
+
+
+@pytest.mark.asyncio
+async def test_library_filters_game_and_mod_sources(launcher: Launcher) -> None:
+    launcher.add_channel("image-pack", preset="dol-image-pack")
+    app = DolctlApp(launcher)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.open_library("mods")
+        await pilot.pause()
+
+        version_source = app.query_one("#version-source")
+        mod_source = app.query_one("#mod-source")
+        assert str(version_source.value) == "modloader"
+        assert str(mod_source.value) == "image-pack"
 
 
 @pytest.mark.asyncio

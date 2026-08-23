@@ -146,6 +146,7 @@ def _default_config() -> Config:
     return Config(
         channels={
             "modloader": ChannelConfig(
+                kind=modloader.kind,
                 provider=modloader.provider,
                 repo=modloader.repo,
                 asset_regex=modloader.asset_regex,

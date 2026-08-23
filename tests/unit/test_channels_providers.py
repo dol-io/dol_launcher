@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -31,6 +32,42 @@ def test_channel_lifecycle_and_cache_invalidation(launcher: Launcher) -> None:
     assert "mirror" not in dict(launcher.channels())
 
 
+def test_built_in_presets_cover_common_game_and_mod_releases() -> None:
+    presets = dict(Launcher.channel_presets())
+    assert set(presets) == {
+        "dol-i18n-zh",
+        "dol-image-pack",
+        "dol-modloader",
+        "dol-modloader-zh",
+        "doli",
+    }
+    assert presets["dol-modloader"].kind == "game"
+    assert presets["dol-modloader-zh"].kind == "game"
+    assert presets["dol-image-pack"].kind == "mod"
+    assert presets["dol-i18n-zh"].kind == "mod"
+    assert presets["doli"].kind == "mod"
+
+    known_assets = {
+        "dol-modloader": "DoL-ModLoader-2.101.1-dol-0.5.11.9-deadbeef.zip",
+        "dol-modloader-zh": "DoL-ModLoader-0.5.11.9-v2.101.1.zip",
+        "dol-image-pack": "GameOriginalImagePack.mod.zip",
+        "dol-i18n-zh": "ModI18N-0.5.11.9-chs-1.0.0a.mod.zip",
+        "doli": "DOLI.mod.zip",
+    }
+    for key, asset in known_assets.items():
+        assert re.fullmatch(presets[key].asset_regex, asset)
+    assert not re.fullmatch(
+        presets["dol-modloader-zh"].asset_regex,
+        "DoL-ModLoader-0.5.11.9-v2.101.1-polyfill.zip",
+    )
+
+
+def test_mod_preset_materialises_a_typed_channel(launcher: Launcher) -> None:
+    channel = launcher.add_channel("image-pack", preset="dol-image-pack")
+    assert channel.kind == "mod"
+    assert dict(launcher.channels())["image-pack"].kind == "mod"
+
+
 def test_channel_conflicts_and_missing_resources(launcher: Launcher) -> None:
     with pytest.raises(ConflictError):
         launcher.add_channel("modloader", preset="dol-modloader")
@@ -47,6 +84,7 @@ def test_channel_conflicts_and_missing_resources(launcher: Launcher) -> None:
         ({"repo": "not-a-repo"}, "owner/name"),
         ({"repo": "owner/repo", "asset_regex": "["}, "Invalid asset regex"),
         ({"repo": "owner/repo", "provider": "unknown"}, "Unsupported provider"),
+        ({"repo": "owner/repo", "kind": "other"}, "kind must be"),
         ({"preset": "missing"}, "Unknown channel preset"),
     ],
 )

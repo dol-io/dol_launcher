@@ -25,6 +25,7 @@ from infra.zip import extract_zip
 from .models import (
     ConflictError,
     ChannelConfig,
+    ChannelKind,
     DataError,
     DolCtlError,
     ExternalError,
@@ -145,6 +146,7 @@ def _channel_fingerprint(name: str, channel: ChannelConfig) -> str:
     payload = json.dumps(
         {
             "name": name,
+            "kind": channel.kind,
             "provider": channel.provider,
             "repo": channel.repo,
             "asset_regex": channel.asset_regex,
@@ -191,8 +193,12 @@ def _save_remote_cache(
     atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
-def list_remote_versions(
-    root: Path, channel: str, *, refresh: bool = False
+def _list_remote_releases(
+    root: Path,
+    channel: str,
+    *,
+    expected_kind: ChannelKind,
+    refresh: bool = False,
 ) -> list[RemoteVersion]:
     layout = RootLayout.open(root)
     channel = validate_resource_name(channel, "channel")
@@ -200,6 +206,11 @@ def list_remote_versions(
     channel_config = config.channels.get(channel)
     if channel_config is None:
         raise NotFoundError(f"Channel not found: {channel}")
+    if channel_config.kind != expected_kind:
+        raise ValidationError(
+            f"Channel {channel} provides {channel_config.kind} archives, "
+            f"not {expected_kind} archives"
+        )
     fingerprint = _channel_fingerprint(channel, channel_config)
     cache_file = layout.channel_cache_file(channel)
     if not refresh:
@@ -222,6 +233,28 @@ def list_remote_versions(
         ) from exc
     _save_remote_cache(cache_file, remote_versions, fingerprint)
     return remote_versions
+
+
+def list_remote_versions(
+    root: Path, channel: str, *, refresh: bool = False
+) -> list[RemoteVersion]:
+    return _list_remote_releases(
+        root,
+        channel,
+        expected_kind="game",
+        refresh=refresh,
+    )
+
+
+def list_remote_mods(
+    root: Path, channel: str, *, refresh: bool = False
+) -> list[RemoteVersion]:
+    return _list_remote_releases(
+        root,
+        channel,
+        expected_kind="mod",
+        refresh=refresh,
+    )
 
 
 def _normalise_selector(value: str, channel: str) -> str:

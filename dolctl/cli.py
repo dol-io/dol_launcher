@@ -321,7 +321,11 @@ def version_remote(
     refresh: bool = typer.Option(False, "--refresh"),
 ) -> None:
     launcher = _launcher(ctx)
-    names = [channel] if channel else [name for name, _config in launcher.channels()]
+    names = (
+        [channel]
+        if channel
+        else [name for name, config in launcher.channels() if config.kind == "game"]
+    )
     for name in names:
         typer.echo(f"[{name}]")
         for version in launcher.remote_versions(name, refresh=refresh):
@@ -422,6 +426,44 @@ def mod_add(
     typer.echo(f"Installed mod: {installed}")
 
 
+@mod_app.command("remote")
+@with_errors
+def mod_remote(
+    ctx: typer.Context,
+    channel: Optional[str] = typer.Option(None, "--channel"),
+    refresh: bool = typer.Option(False, "--refresh"),
+) -> None:
+    launcher = _launcher(ctx)
+    names = (
+        [channel]
+        if channel
+        else [name for name, config in launcher.channels() if config.kind == "mod"]
+    )
+    for name in names:
+        typer.echo(f"[{name}]")
+        for release in launcher.remote_mods(name, refresh=refresh):
+            typer.echo(f"{release.id}\t{release.published_at}\t{release.asset_name}")
+
+
+@mod_app.command("install")
+@with_errors
+def mod_install(
+    ctx: typer.Context,
+    selector: str = typer.Argument("latest"),
+    channel: str = typer.Option(..., "--channel"),
+    mod_id: Optional[str] = typer.Option(None, "--id"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    installed = _launcher(ctx).install_remote_mod(
+        channel,
+        selector,
+        mod_id=mod_id,
+        force=force,
+        progress=_progress("download"),
+    )
+    typer.echo(f"Installed mod: {installed}")
+
+
 @mod_app.command("info")
 @with_errors
 def mod_info(ctx: typer.Context, mod_id: str) -> None:
@@ -447,14 +489,17 @@ def mod_remove(ctx: typer.Context, mod_id: str) -> None:
 @with_errors
 def channel_list(ctx: typer.Context) -> None:
     for name, channel in _launcher(ctx).channels():
-        typer.echo(f"{name}\t{channel.provider}\t{channel.repo}\t{channel.asset_regex}")
+        typer.echo(
+            f"{name}\t{channel.kind}\t{channel.provider}\t{channel.repo}\t"
+            f"{channel.asset_regex}"
+        )
 
 
 @channel_app.command("preset")
 @with_errors
 def channel_preset() -> None:
     for name, preset in Launcher.channel_presets():
-        typer.echo(f"{name}\t{preset.repo}\t{preset.description}")
+        typer.echo(f"{name}\t{preset.kind}\t{preset.repo}\t{preset.description}")
 
 
 @channel_app.command("add")
@@ -463,6 +508,7 @@ def channel_add(
     ctx: typer.Context,
     name: str,
     preset: Optional[str] = typer.Option(None, "--preset"),
+    kind: Optional[str] = typer.Option(None, "--kind"),
     repo: Optional[str] = typer.Option(None, "--repo"),
     asset_regex: Optional[str] = typer.Option(None, "--asset-regex"),
     force: bool = typer.Option(False, "--force"),
@@ -470,6 +516,7 @@ def channel_add(
     channel = _launcher(ctx).add_channel(
         name,
         preset=preset,
+        kind=kind,
         repo=repo,
         asset_regex=asset_regex,
         force=force,

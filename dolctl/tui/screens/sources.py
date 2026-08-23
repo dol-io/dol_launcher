@@ -36,7 +36,9 @@ class SourcesTab(RefreshableTab):
         with Horizontal(id="main"):
             with Vertical():
                 table: DataTable[str] = DataTable(id="sources", cursor_type="row")
-                table.add_columns("name", "provider", "repository", "asset regex")
+                table.add_columns(
+                    "name", "kind", "provider", "repository", "asset regex"
+                )
                 table.border_title = " Configured sources "
                 yield table
             with Vertical():
@@ -55,6 +57,7 @@ class SourcesTab(RefreshableTab):
         for name, source in self.launcher.channels():
             table.add_row(
                 name,
+                source.kind,
                 source.provider,
                 source.repo,
                 source.asset_regex,
@@ -63,7 +66,12 @@ class SourcesTab(RefreshableTab):
         presets = self.query_one("#presets", ListView)
         presets.clear()
         for key, preset in self.launcher.channel_presets():
-            presets.append(PresetItem(key, f"{key}\n  {preset.description}"))
+            presets.append(
+                PresetItem(
+                    key,
+                    f"[{preset.kind}] {key}\n  {preset.description}",
+                )
+            )
 
     def _selected_source(self) -> str | None:
         table = self.query_one("#sources", DataTable)
@@ -115,6 +123,7 @@ class SourcesTab(RefreshableTab):
                 "Add GitHub source",
                 [
                     InputField("name", "Source name", required=True),
+                    InputField("kind", "Kind (game or mod)", default="game"),
                     InputField("repo", "Repository (owner/name)", required=True),
                     InputField("regex", "Asset regex", default=r".*\.zip"),
                 ],
@@ -127,6 +136,7 @@ class SourcesTab(RefreshableTab):
             return
         self._create_source(
             values["name"],
+            kind=values["kind"],
             repo=values["repo"],
             asset_regex=values["regex"],
         )
@@ -153,6 +163,7 @@ class SourcesTab(RefreshableTab):
             InputModal(
                 f"Edit source {name}",
                 [
+                    InputField("kind", "Kind (game or mod)", default=current.kind),
                     InputField("repo", "Repository", default=current.repo),
                     InputField("regex", "Asset regex", default=current.asset_regex),
                 ],
@@ -167,6 +178,7 @@ class SourcesTab(RefreshableTab):
             f"Updating source {name}…",
             lambda: self.launcher.update_channel(
                 name,
+                kind=values["kind"],
                 repo=values["repo"],
                 asset_regex=values["regex"],
             ),

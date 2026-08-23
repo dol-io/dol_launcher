@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, cast, Literal
 
 
 class DolCtlError(Exception):
@@ -31,10 +31,13 @@ class ExternalError(DolCtlError):
 
 ProgressCallback = Callable[[int, int | None], None]
 BuildStatus = Literal["full", "cache-hit"]
+ChannelKind = Literal["game", "mod"]
+CHANNEL_KINDS: tuple[ChannelKind, ...] = ("game", "mod")
 
 
 @dataclass(slots=True)
 class ChannelConfig:
+    kind: ChannelKind = "game"
     provider: str = "github"
     repo: str = ""
     asset_regex: str = r".*\.zip"
@@ -155,7 +158,7 @@ class DoctorReport:
         return all(check.ok for check in self.checks)
 
 
-_RESERVED_CHANNEL_KEYS = {"provider", "repo", "asset_regex"}
+_RESERVED_CHANNEL_KEYS = {"kind", "provider", "repo", "asset_regex"}
 
 
 def _schema(data: dict[str, Any], *, maximum: int = 1) -> int:
@@ -231,7 +234,11 @@ def config_from_dict(data: dict[str, Any]) -> Config:
             for key, value in raw.items()
             if key not in _RESERVED_CHANNEL_KEYS
         }
+        raw_kind = _string(raw, "kind", "game")
+        if raw_kind not in CHANNEL_KINDS:
+            raise DataError("channel kind must be 'game' or 'mod'")
         channels[name] = ChannelConfig(
+            kind=cast(ChannelKind, raw_kind),
             provider=_string(raw, "provider", "github"),
             repo=_string(raw, "repo"),
             asset_regex=_string(raw, "asset_regex", r".*\.zip"),
@@ -258,6 +265,7 @@ def config_to_dict(config: Config) -> dict[str, Any]:
     if config.channels:
         data["channels"] = {
             name: {
+                "kind": channel.kind,
                 "provider": channel.provider,
                 "repo": channel.repo,
                 "asset_regex": channel.asset_regex,

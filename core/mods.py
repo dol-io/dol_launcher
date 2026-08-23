@@ -9,6 +9,7 @@ import stat
 import tomllib
 import zipfile
 
+import providers
 from infra.fs import (
     calc_sha256,
     ensure_dir,
@@ -35,7 +36,8 @@ from .models import (
     mod_to_dict,
 )
 from .profiles import remove_mod_from_all_profiles
-from .root import RootLayout, validate_resource_name
+from .root import RootLayout, load_config, validate_resource_name
+from .versions import _select_remote_version, list_remote_mods
 
 
 def _mod_manifest(layout: RootLayout, mod_id: str) -> Path:
@@ -184,6 +186,59 @@ def list_mods(root: Path) -> list[Mod]:
     return mods
 
 
+def _publish_mod_archive(
+    layout: RootLayout,
+    source: Path,
+    mod_id: str | None = None,
+    *,
+    source_kind: str,
+    source_ref: str,
+    force: bool = False,
+) -> str:
+    boot, wrapper = _inspect_mod_archive(source)
+    name = str(boot.get("name") or source.stem.replace(".mod", ""))
+    selected_id = (
+        validate_resource_name(mod_id, "mod")
+        if mod_id
+        else _slug(name, source.name)
+    )
+
+    with staging_directory(layout.root, "mods") as workspace:
+        payload = ensure_dir(workspace / "payload")
+        destination_archive = payload / f"{selected_id}.mod.zip"
+        if wrapper is None:
+            shutil.copy2(source, destination_archive)
+        else:
+            _flatten_archive(source, destination_archive, wrapper)
+        _inspect_mod_archive(destination_archive)
+        digest = calc_sha256(destination_archive)
+        mod = Mod(
+            id=selected_id,
+            name=name,
+            version=str(boot.get("version") or ""),
+            author=str(boot.get("author") or ""),
+            description=str(boot.get("description") or ""),
+            source=source_kind,
+            source_ref=source_ref,
+            installed_at=now_iso(),
+            sha256=digest,
+            path=payload,
+        )
+        write_toml(payload / ".mod.toml", mod_to_dict(mod))
+        try:
+            replace_directory(
+                payload,
+                layout.mod_dir(selected_id),
+                collection=layout.mods,
+                force=force,
+            )
+        except FileExistsError as exc:
+            raise ConflictError(
+                f"Mod already exists: {selected_id}; use --force to replace it"
+            ) from exc
+        return selected_id
+
+
 def add_mod_from_zip(
     root: Path,
     path_or_url: str,
@@ -207,52 +262,54 @@ def add_mod_from_zip(
             raise NotFoundError(f"Mod archive not found: {source}")
 
     try:
-        boot, wrapper = _inspect_mod_archive(source)
-        name = str(boot.get("name") or source.stem.replace(".mod", ""))
-        selected_id = (
-            validate_resource_name(mod_id, "mod")
-            if mod_id
-            else _slug(name, source.name)
+        return _publish_mod_archive(
+            layout,
+            source,
+            mod_id,
+            source_kind=source_kind,
+            source_ref=path_or_url,
+            force=force,
         )
-
-        with staging_directory(layout.root, "mods") as workspace:
-            payload = ensure_dir(workspace / "payload")
-            destination_archive = payload / f"{selected_id}.mod.zip"
-            if wrapper is None:
-                shutil.copy2(source, destination_archive)
-            else:
-                _flatten_archive(source, destination_archive, wrapper)
-            _inspect_mod_archive(destination_archive)
-            digest = calc_sha256(destination_archive)
-            mod = Mod(
-                id=selected_id,
-                name=name,
-                version=str(boot.get("version") or ""),
-                author=str(boot.get("author") or ""),
-                description=str(boot.get("description") or ""),
-                source=source_kind,
-                source_ref=path_or_url,
-                installed_at=now_iso(),
-                sha256=digest,
-                path=payload,
-            )
-            write_toml(payload / ".mod.toml", mod_to_dict(mod))
-            try:
-                replace_directory(
-                    payload,
-                    layout.mod_dir(selected_id),
-                    collection=layout.mods,
-                    force=force,
-                )
-            except FileExistsError as exc:
-                raise ConflictError(
-                    f"Mod already exists: {selected_id}; use --force to replace it"
-                ) from exc
-            return selected_id
     except DolCtlError:
         raise
     except Exception as exc:
         raise ExternalError(f"Could not import mod {source.name}: {exc}") from exc
+
+
+def install_mod_from_remote(
+    root: Path,
+    channel: str,
+    selector: str,
+    mod_id: str | None = None,
+    *,
+    force: bool = False,
+    progress: ProgressCallback | None = None,
+) -> str:
+    layout = RootLayout.open(root)
+    channel = validate_resource_name(channel, "channel")
+    releases = list_remote_mods(layout.root, channel)
+    remote = _select_remote_version(releases, selector, channel)
+    config = load_config(layout.root)
+    provider = providers.create_provider(channel, config.channels[channel])
+    cache_key = hashlib.sha256(remote.download_url.encode()).hexdigest()[:16]
+    archive = layout.download_cache / f"remote-mod-{cache_key}.zip"
+    ensure_dir(archive.parent)
+    try:
+        provider.download(remote, archive, progress=progress)
+        return _publish_mod_archive(
+            layout,
+            archive,
+            mod_id,
+            source_kind="remote",
+            source_ref=remote.source_ref or remote.download_url,
+            force=force,
+        )
+    except DolCtlError:
+        raise
+    except Exception as exc:
+        raise ExternalError(
+            f"Could not install {selector!r} from {channel}: {exc}"
+        ) from exc
 
 
 def remove_mod(root: Path, mod_id: str) -> RemoveResult:

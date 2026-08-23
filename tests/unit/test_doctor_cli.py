@@ -103,6 +103,23 @@ def test_cli_local_version_defaults_to_local_channel(
     assert Launcher.open(root).version("game").channel == "local"
 
 
+def test_cli_adds_a_typed_builtin_mod_source(launcher: Launcher) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--root",
+            str(launcher.root),
+            "channel",
+            "add",
+            "doli",
+            "--preset",
+            "doli",
+        ],
+    )
+    assert result.exit_code == 0
+    assert dict(launcher.channels())["doli"].kind == "mod"
+
+
 def test_cli_rejects_ambiguous_install_options(
     launcher: Launcher, make_version_zip
 ) -> None:

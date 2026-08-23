@@ -48,7 +48,7 @@ selects `default`.
 ### 2.3 Versions
 
 - Import a local zip or extracted directory.
-- Discover and install releases from configured GitHub channels.
+- Discover and install releases from configured `game` GitHub channels.
 - List and remove installed versions.
 - Detect the entry HTML at install time.
 - Treat an installed version as immutable. Reinstalling the same id with
@@ -57,6 +57,7 @@ selects `default`.
 ### 2.4 Mods
 
 - Import a local zip or HTTP(S) URL.
+- Discover and install release assets from configured `mod` GitHub channels.
 - Require a readable `boot.json`; accept a single wrapper directory and
   flatten it during import.
 - Read name, version, author, and description from `boot.json`.
@@ -96,7 +97,7 @@ CLI and TUI render the same report.
 
 - A Qt/Electron desktop clone of Prism Launcher.
 - Embedded web browser or game save management.
-- Mod dependency solving or remote mod marketplaces.
+- Mod dependency solving or dynamic remote mod marketplaces.
 - Cloud sync, accounts, telemetry, or background update daemons.
 - Multiple simultaneously managed servers inside one launcher process.
 - Mod file-conflict analysis: ModLoader receives ordered archives, so dolctl
@@ -167,10 +168,18 @@ open_browser = true
 index_cache_ttl_seconds = 600
 
 [channels.modloader]
+kind = "game"
 provider = "github"
 repo = "Lyoko-Jeremie/DoLModLoaderBuild"
 asset_regex = "DoL-ModLoader-.*\\.zip"
 ```
+
+Channels are typed as `game` or `mod`, so an archive can only enter the
+matching installer. Missing `kind` fields from older configurations read as
+`game`. Built-in presets are static, reviewed GitHub Releases sources rather
+than a remotely controlled marketplace. A fresh ROOT configures the
+`dol-modloader` game preset; the opt-in presets are `dol-modloader-zh` for a
+localised game build and `dol-image-pack`, `dol-i18n-zh`, and `doli` for Mods.
 
 `.dolctl/state.toml`:
 
@@ -221,11 +230,14 @@ dolctl version remove <id> [--force]
 
 dolctl mod list
 dolctl mod add <path-or-url> [--id <id>] [--force]
+dolctl mod remote [--channel <name>] [--refresh]
+dolctl mod install [<selector>] --channel <name> [--id <id>] [--force]
 dolctl mod info <id>
 dolctl mod remove <id>
 
 dolctl channel list
 dolctl channel add <name> (--preset <name> | --repo <owner/repo>)
+                   [--kind game|mod]
 dolctl channel remove <name>
 dolctl channel preset
 
@@ -248,8 +260,9 @@ resource tabs:
    selecting or ordering mods happen in focused dialogs rather than inline in
    the overview.
 2. **Library** — manage Versions, Mods, and Sources as three related sections.
-   Library operations are supporting tasks, not peers of the normal launch
-   flow.
+   Version and Mod views only offer sources of their matching type; the Mods
+   view can install the latest release from a configured Mod source. Library
+   operations are supporting tasks, not peers of the normal launch flow.
 3. **System** — inspect ROOT information and the shared doctor report.
 
 Highlighting an instance only changes the local view. Mutations use explicit

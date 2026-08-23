@@ -143,6 +143,12 @@ def test_remote_listing_is_cached(
     assert calls == 2
 
 
+def test_version_listing_rejects_a_mod_channel(launcher: Launcher) -> None:
+    launcher.add_channel("mods", kind="mod", repo="owner/mods")
+    with pytest.raises(ValidationError, match="provides mod archives"):
+        launcher.remote_versions("mods")
+
+
 def test_remote_install_uses_provider_contract(
     launcher: Launcher,
     make_version_zip,

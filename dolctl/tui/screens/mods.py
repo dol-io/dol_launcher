@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Button, Checkbox, DataTable, Input
+from textual.widgets import Button, Checkbox, DataTable, Input, Select
 
 from core.models import Mod, RemoveResult
 
@@ -13,7 +13,9 @@ from .base import RefreshableTab
 class ModsTab(RefreshableTab):
     DEFAULT_CSS = """
     ModsTab #import { height: auto; padding-bottom: 1; }
+    ModsTab #remote-import { height: auto; padding-bottom: 1; }
     ModsTab #source { width: 1fr; margin-right: 1; }
+    ModsTab #mod-source { width: 1fr; max-width: 48; margin-right: 1; }
     ModsTab #mod-id { width: 24; margin-right: 1; }
     ModsTab Checkbox { width: auto; margin-right: 1; }
     ModsTab DataTable {
@@ -36,6 +38,13 @@ class ModsTab(RefreshableTab):
             yield Input(placeholder="id override", id="mod-id")
             yield Checkbox("replace", id="force")
             yield Button("Import", id="import-button", classes="action-primary")
+        with Horizontal(id="remote-import"):
+            yield Select([], prompt="Remote Mod source", id="mod-source")
+            yield Button(
+                "Install latest",
+                id="install-remote",
+                classes="action-accent",
+            )
         table: DataTable[str] = DataTable(id="mods", cursor_type="row")
         table.add_columns("id", "name", "version", "author", "source")
         table.border_title = " Mod library "
@@ -45,9 +54,10 @@ class ModsTab(RefreshableTab):
             yield Button("Remove", id="remove", classes="action-danger")
 
     def refresh_from_disk(self) -> None:
+        snapshot = self.launcher.snapshot()
         table = self.query_one("#mods", DataTable)
         table.clear()
-        for mod in self.launcher.mods():
+        for mod in snapshot.mods:
             table.add_row(
                 mod.id,
                 mod.name,
@@ -56,6 +66,16 @@ class ModsTab(RefreshableTab):
                 mod.source,
                 key=mod.id,
             )
+        select = self.query_one("#mod-source", Select)
+        previous = None if select.is_blank() else str(select.value)
+        names = [
+            name for name, channel in snapshot.channels if channel.kind == "mod"
+        ]
+        select.set_options([(name, name) for name in names])
+        if previous in names:
+            select.value = previous
+        elif names:
+            select.value = names[0]
 
     def _selected(self) -> str | None:
         table = self.query_one("#mods", DataTable)
@@ -71,6 +91,8 @@ class ModsTab(RefreshableTab):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "import-button":
             self._import()
+        elif event.button.id == "install-remote":
+            self._install_remote()
         elif event.button.id == "info":
             self._info()
         elif event.button.id == "remove":
@@ -102,6 +124,27 @@ class ModsTab(RefreshableTab):
         self.query_one("#mod-id", Input).value = ""
         self.query_one("#force", Checkbox).value = False
         self.set_status(f"Imported mod {result}", "success")
+
+    def _install_remote(self) -> None:
+        select = self.query_one("#mod-source", Select)
+        if select.is_blank():
+            self.set_status("Add and select a Mod source first", "warning")
+            return
+        channel = str(select.value)
+        mod_id = self.query_one("#mod-id", Input).value.strip() or None
+        force = self.query_one("#force", Checkbox).value
+        progress = self.progress_reporter("Downloading mod")
+        self.run_operation(
+            f"Installing latest Mod from {channel}…",
+            lambda: self.launcher.install_remote_mod(
+                channel,
+                mod_id=mod_id,
+                force=force,
+                progress=progress,
+            ),
+            self._imported,
+            mutates=True,
+        )
 
     def _info(self) -> None:
         mod_id = self._selected()

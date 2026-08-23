@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import zipfile
 
 import pytest
 
+import providers
 from core.launcher import Launcher
-from core.models import ConflictError, ValidationError
+from core.models import ConflictError, RemoteVersion, ValidationError
 
 
 def test_import_reads_metadata_and_hashes_archive(
@@ -66,6 +68,52 @@ def test_remove_mod_detaches_all_instances(launcher: Launcher, make_mod_zip) -> 
     assert result.affected_profiles == ("default", "other")
     assert launcher.instance("default").mod_order == []
     assert launcher.instance("other").mod_order == []
+
+
+def test_remote_mod_install_uses_typed_channel_and_provider(
+    launcher: Launcher,
+    make_mod_zip,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_zip = make_mod_zip("DOLI.mod.zip", mod_name="DOLI", version="0.2.3")
+    release = RemoteVersion(
+        id="v0.2.3",
+        display_name="DOLI v0.2.3",
+        channel="doli",
+        published_at="2026-03-28T00:00:00Z",
+        asset_name="DOLI.mod.zip",
+        download_url="https://example.invalid/DOLI.mod.zip",
+        source_ref="https://example.invalid/releases/v0.2.3",
+    )
+    launcher.add_channel("doli", preset="doli")
+
+    class FakeProvider:
+        def list_versions(self) -> list[RemoteVersion]:
+            return [release]
+
+        def download(self, _release, destination, *, progress=None) -> str:
+            shutil.copy2(source_zip, destination)
+            if progress:
+                progress(source_zip.stat().st_size, source_zip.stat().st_size)
+            return "digest"
+
+    monkeypatch.setattr(providers, "create_provider", lambda *_args: FakeProvider())
+    ticks: list[tuple[int, int | None]] = []
+    installed = launcher.install_remote_mod(
+        "doli",
+        progress=lambda done, total: ticks.append((done, total)),
+    )
+    mod = launcher.mod(installed)
+    assert installed == "doli"
+    assert mod.version == "0.2.3"
+    assert mod.source == "remote"
+    assert mod.source_ref == release.source_ref
+    assert ticks
+
+
+def test_remote_mod_listing_rejects_a_game_channel(launcher: Launcher) -> None:
+    with pytest.raises(ValidationError, match="provides game archives"):
+        launcher.remote_mods("modloader")
 
 
 def test_absolute_mod_id_cannot_delete_external_directory(

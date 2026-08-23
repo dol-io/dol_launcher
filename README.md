@@ -39,8 +39,9 @@ TUI 现在围绕日常启动流程组织为三个工作区：
 3. `System`：查看 ROOT 和诊断结果。
 
 第一次使用时，先在 `Library → Versions` 导入游戏，再回到 `Play` 的
-`Configure` 为实例选择版本；需要 Mod 时先在 `Library → Mods` 导入，然后用
-`Manage mods` 启用和排序。之后日常只需选中实例并按 `Launch`。
+`Configure` 为实例选择版本；需要 Mod 时先在 `Library → Sources` 添加内置
+Mod 来源，再到 `Library → Mods` 选择来源并安装，最后用 `Manage mods` 启用和
+排序。也可以继续从本地路径或 URL 导入。之后日常只需选中实例并按 `Launch`。
 
 快捷键 `1`–`3` 切换工作区，`F5` 刷新，`q` 退出，`?` 查看完整帮助；在
 `Play` 中还可以使用 `n/a/e/m/b/l/x` 完成新建、设为活动、配置、管理 Mod、
@@ -71,7 +72,7 @@ uv run dolctl --root "$GAME_ROOT" run default
 
 ### 从远程安装
 
-新 ROOT 已预置可直接使用的 ModLoader GitHub 来源：
+新 ROOT 已配置可直接使用的 ModLoader GitHub 来源：
 
 ```bash
 uv run dolctl --root "$GAME_ROOT" version remote --channel modloader
@@ -80,11 +81,36 @@ uv run dolctl --root "$GAME_ROOT" instance configure default \
   --version <安装后显示的版本-id>
 ```
 
+内置来源经过资源类型区分，游戏包不会误走 Mod 安装器，`.mod.zip` 也不会被当作
+游戏版本。除默认来源外，其余来源是可选 preset：
+
+| preset | 类型 | 内容 |
+| --- | --- | --- |
+| `dol-modloader` | game | 带 SugarCube-2 ModLoader 的游戏包 |
+| `dol-modloader-zh` | game | 中文本地化 ModLoader 游戏包 |
+| `dol-image-pack` | mod | 原图包 |
+| `dol-i18n-zh` | mod | 中文 I18N Mod |
+| `doli` | mod | Degrees of Lewdity Intelligence |
+
+可以在 TUI 的 `Library → Sources` 选择 `Add preset`，或使用 CLI：
+
+```bash
+# 添加并安装一个可选游戏来源
+uv run dolctl --root "$GAME_ROOT" channel add zh \
+  --preset dol-modloader-zh
+uv run dolctl --root "$GAME_ROOT" version install latest --channel zh
+
+# 添加并安装一个 Mod 来源
+uv run dolctl --root "$GAME_ROOT" channel add doli --preset doli
+uv run dolctl --root "$GAME_ROOT" mod remote --channel doli
+uv run dolctl --root "$GAME_ROOT" mod install latest --channel doli
+```
+
 也可以添加自己的 GitHub Releases 来源：
 
 ```bash
 uv run dolctl --root "$GAME_ROOT" channel add custom \
-  --repo owner/repository --asset-regex 'game-.*\.zip'
+  --kind game --repo owner/repository --asset-regex 'game-.*\.zip'
 ```
 
 `asset_regex` 使用完整匹配。若设置了 `GITHUB_TOKEN`，远程请求会携带它，
@@ -117,12 +143,15 @@ dolctl version remove <id> [--force]
 
 dolctl mod list
 dolctl mod add <path-or-url> [--id <id>] [--force]
+dolctl mod remote [--channel <name>] [--refresh]
+dolctl mod install [latest|<id>] --channel <name> [--id <id>] [--force]
 dolctl mod info <id>
 dolctl mod remove <id>
 
 dolctl channel list
 dolctl channel preset
 dolctl channel add <name> (--preset <preset> | --repo <owner/repo>)
+                          [--kind game|mod]
 dolctl channel remove <name>
 
 dolctl build [<instance>] [--clean]

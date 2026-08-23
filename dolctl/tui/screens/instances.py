@@ -81,8 +81,6 @@ class InstancesTab(RefreshableTab):
     }
 
     InstancesTab #enabled-mods {
-        height: 1fr;
-        min-height: 6;
         margin-top: 1;
         border: round ansi_blue;
         border-title-color: ansi_yellow;
@@ -236,6 +234,7 @@ class InstancesTab(RefreshableTab):
     def _render_selected(self, snapshot: LauncherSnapshot) -> None:
         table = self.query_one("#enabled-mods", DataTable)
         table.clear()
+        self._fit_enabled_mod_table(table)
         profile = self._selected_profile()
         empty = self.query_one("#empty-state", Static)
         facts = self.query_one("#instance-facts", Static)
@@ -310,7 +309,17 @@ class InstancesTab(RefreshableTab):
                 mod.version if mod is not None else "",
                 key=mod_id,
             )
+        self._fit_enabled_mod_table(table)
         self._sync_buttons()
+
+    @staticmethod
+    def _fit_enabled_mod_table(table: DataTable) -> None:
+        # DataTable defaults to max-height: 100%, which creates a nested
+        # scrollbar. Give it its full content height and let the detail pane
+        # own scrolling for the complete page.
+        content_height = table.header_height + table.row_count + 2
+        table.styles.height = content_height
+        table.styles.max_height = content_height
 
     def _sync_buttons(self) -> None:
         if not self.is_mounted:

@@ -3,7 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from core.models import ChannelConfig, ProgressCallback, RemoteVersion, ValidationError
+from core.models import (
+    CHANNEL_KINDS,
+    ChannelConfig,
+    ProgressCallback,
+    RemoteVersion,
+    ValidationError,
+)
 
 
 @runtime_checkable
@@ -34,4 +40,6 @@ def create_provider(channel_name: str, config: ChannelConfig) -> VersionProvider
 
 
 def validate_config(config: ChannelConfig) -> None:
+    if config.kind not in CHANNEL_KINDS:
+        raise ValidationError("Channel kind must be 'game' or 'mod'")
     create_provider("validation", config)
