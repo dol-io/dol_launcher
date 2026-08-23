@@ -4,99 +4,68 @@ from pathlib import Path
 
 import pytest
 
-from core.models import DolCtlError
-from core.profiles import (
-    add_mod_to_profile,
-    create_profile,
-    get_profile,
-    list_profiles,
-    remove_mod_from_profile,
-    reorder_mods,
-    set_active_profile,
-    set_profile_version,
-)
+from core.launcher import Launcher
+from core.models import ConflictError, NotFoundError, ValidationError
+from core.root import load_state
 
 
-def _make_fake_mod(root: Path, mod_id: str) -> None:
-    mod_dir = root / "mods" / mod_id
-    mod_dir.mkdir(parents=True, exist_ok=True)
-    (mod_dir / ".mod.toml").write_text(f'id = "{mod_id}"\n', encoding="utf-8")
-    (mod_dir / f"{mod_id}.mod.zip").write_bytes(b"")
+def _install_game(launcher: Launcher, source: Path, version_id: str = "game") -> None:
+    launcher.install_version_directory(source, version_id=version_id)
 
 
-def _make_fake_version(root: Path, version_id: str) -> None:
-    version_dir = root / "versions" / version_id
-    version_dir.mkdir(parents=True, exist_ok=True)
-    (version_dir / ".manifest.toml").write_text("", encoding="utf-8")
+def test_instance_lifecycle_and_settings(launcher: Launcher, make_version_dir) -> None:
+    _install_game(launcher, make_version_dir())
+    created = launcher.create_instance("casual", version_id="game")
+    assert created.version_id == "game"
+    launcher.select_instance("casual")
+    configured = launcher.configure_instance("casual", port=9000, open_browser=False)
+    assert configured.port == 9000
+    assert configured.open_browser is False
+    assert launcher.active_instance() == "casual"
 
 
-class TestProfileBasics:
-    def test_default_profile_exists_after_init(self, root: Path) -> None:
-        assert "default" in list_profiles(root)
-
-    def test_create_and_list(self, root: Path) -> None:
-        create_profile(root, "alt")
-        assert sorted(list_profiles(root)) == ["alt", "default"]
-
-    def test_create_rejects_duplicate(self, root: Path) -> None:
-        create_profile(root, "alt")
-        with pytest.raises(DolCtlError):
-            create_profile(root, "alt")
-
-    def test_set_active(self, root: Path) -> None:
-        create_profile(root, "alt")
-        set_active_profile(root, "alt")
-        from core.root import load_state
-
-        assert load_state(root).active_profile == "alt"
-
-    def test_set_version_requires_existing_version(self, root: Path) -> None:
-        with pytest.raises(DolCtlError):
-            set_profile_version(root, "default", "nonexistent")
-
-    def test_set_version_updates_profile_and_state(self, root: Path) -> None:
-        _make_fake_version(root, "vX")
-        set_profile_version(root, "default", "vX")
-        assert get_profile(root, "default").version_id == "vX"
-        from core.root import load_state
-
-        assert load_state(root).last_used_version == "vX"
+def test_default_instance_cannot_be_deleted(launcher: Launcher) -> None:
+    with pytest.raises(ConflictError, match="default"):
+        launcher.delete_instance("default")
 
 
-class TestModOrder:
-    def test_add_and_remove(self, root: Path) -> None:
-        _make_fake_mod(root, "a")
-        _make_fake_mod(root, "b")
-        add_mod_to_profile(root, "default", "a")
-        add_mod_to_profile(root, "default", "b")
-        assert get_profile(root, "default").mod_order == ["a", "b"]
-        remove_mod_from_profile(root, "default", "a")
-        assert get_profile(root, "default").mod_order == ["b"]
+def test_deleting_active_instance_selects_default_and_removes_runtime(
+    launcher: Launcher,
+) -> None:
+    launcher.create_instance("temporary")
+    launcher.select_instance("temporary")
+    runtime = launcher.root / "runtime" / "temporary"
+    runtime.mkdir(parents=True)
+    launcher.delete_instance("temporary")
+    assert load_state(launcher.root).active_profile == "default"
+    assert not runtime.exists()
 
-    def test_add_rejects_unknown_mod(self, root: Path) -> None:
-        with pytest.raises(DolCtlError):
-            add_mod_to_profile(root, "default", "ghost")
 
-    def test_add_rejects_duplicate(self, root: Path) -> None:
-        _make_fake_mod(root, "a")
-        add_mod_to_profile(root, "default", "a")
-        with pytest.raises(DolCtlError):
-            add_mod_to_profile(root, "default", "a")
+def test_instance_requires_existing_version(launcher: Launcher) -> None:
+    with pytest.raises(NotFoundError, match="Version not found"):
+        launcher.create_instance("broken", version_id="missing")
 
-    def test_reorder_must_be_a_permutation(self, root: Path) -> None:
-        _make_fake_mod(root, "a")
-        _make_fake_mod(root, "b")
-        add_mod_to_profile(root, "default", "a")
-        add_mod_to_profile(root, "default", "b")
 
-        # Same set: OK
-        reorder_mods(root, "default", ["b", "a"])
-        assert get_profile(root, "default").mod_order == ["b", "a"]
+@pytest.mark.parametrize("name", ["../../outside", "/tmp/outside", r"..\outside"])
+def test_instance_names_cannot_escape_root(launcher: Launcher, name: str) -> None:
+    with pytest.raises(ValidationError):
+        launcher.create_instance(name)
 
-        # Missing one: rejected
-        with pytest.raises(DolCtlError):
-            reorder_mods(root, "default", ["a"])
 
-        # Extra one: rejected
-        with pytest.raises(DolCtlError):
-            reorder_mods(root, "default", ["a", "b", "c"])
+def test_mod_enable_disable_and_reorder(launcher: Launcher, make_mod_zip) -> None:
+    alpha = launcher.install_mod(str(make_mod_zip("alpha.zip", mod_name="Alpha")))
+    beta = launcher.install_mod(str(make_mod_zip("beta.zip", mod_name="Beta")))
+    launcher.enable_mod("default", alpha)
+    launcher.enable_mod("default", beta)
+    assert launcher.instance("default").mod_order == [alpha, beta]
+    launcher.reorder_instance_mods("default", [beta, alpha])
+    assert launcher.instance("default").mod_order == [beta, alpha]
+    launcher.disable_mod("default", beta)
+    assert launcher.instance("default").mod_order == [alpha]
+
+
+def test_reorder_must_be_exact_permutation(launcher: Launcher, make_mod_zip) -> None:
+    mod_id = launcher.install_mod(str(make_mod_zip()))
+    launcher.enable_mod("default", mod_id)
+    with pytest.raises(ValidationError, match="exactly"):
+        launcher.reorder_instance_mods("default", [])

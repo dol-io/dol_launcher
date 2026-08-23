@@ -4,7 +4,7 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-from .fs import ensure_dir
+from .fs import ensure_safe_subdirectory
 
 _FORMAT = "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
 _DATEFMT = "%Y-%m-%dT%H:%M:%S%z"
@@ -54,8 +54,7 @@ def setup_logging(root: Path | None, verbose: bool = False) -> logging.Logger:
 
     if root is not None:
         try:
-            log_dir = root / ".dolctl" / "logs"
-            ensure_dir(log_dir)
+            log_dir = ensure_safe_subdirectory(root, ".dolctl", "logs")
             file_handler = logging.handlers.TimedRotatingFileHandler(
                 filename=log_dir / "dolctl.log",
                 when="midnight",
@@ -66,7 +65,7 @@ def setup_logging(root: Path | None, verbose: bool = False) -> logging.Logger:
             file_handler.setLevel(logging.INFO)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
-        except OSError:
+        except (OSError, ValueError):
             # Read-only root or permission issue — keep stderr handler only.
             pass
 

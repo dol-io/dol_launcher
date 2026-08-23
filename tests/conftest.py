@@ -1,100 +1,106 @@
 from __future__ import annotations
 
-import io
+from collections.abc import Callable
+import itertools
 import json
-import zipfile
 from pathlib import Path
+import zipfile
 
 import pytest
 
-from core.root import init_root
+from core.launcher import Launcher
 
 
 @pytest.fixture
-def root(tmp_path: Path) -> Path:
-    init_root(tmp_path)
-    return tmp_path
-
-
-def _write_zip(path: Path, members: dict[str, bytes]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, data in members.items():
-            zf.writestr(name, data)
-    return path
+def launcher(tmp_path: Path) -> Launcher:
+    return Launcher.initialise(tmp_path / "root")
 
 
 @pytest.fixture
-def make_zip(tmp_path: Path):
-    def _make(name: str, members: dict[str, bytes]) -> Path:
-        return _write_zip(tmp_path / name, members)
-
-    return _make
+def root(launcher: Launcher) -> Path:
+    return launcher.root
 
 
 @pytest.fixture
-def make_mod_zip(tmp_path: Path):
-    def _make(
-        name: str,
-        boot: dict | None = None,
-        extra: dict[str, bytes] | None = None,
+def make_version_dir(
+    tmp_path: Path,
+) -> Callable[..., Path]:
+    counter = itertools.count()
+
+    def make(
+        *,
+        entry: str = "index.html",
+        html: str = "<html><head></head><body>game</body></html>",
+        asset: str = "payload",
+        name: str | None = None,
     ) -> Path:
-        members: dict[str, bytes] = {}
-        if boot is not None:
-            members["boot.json"] = json.dumps(boot).encode("utf-8")
-        if extra:
-            members.update(extra)
-        return _write_zip(tmp_path / name, members)
+        directory = tmp_path / (name or f"version-{next(counter)}")
+        (directory / "game").mkdir(parents=True, exist_ok=True)
+        (directory / entry).write_text(html, encoding="utf-8")
+        (directory / "game" / "asset.txt").write_text(asset, encoding="utf-8")
+        return directory
 
-    return _make
-
-
-@pytest.fixture
-def make_version_dir(tmp_path: Path):
-    """Return a factory that produces a fake DoL version directory tree."""
-
-    def _make(entry: str = "index.html", body: str = "<html><head></head></html>") -> Path:
-        version_dir = tmp_path / "fake_version"
-        version_dir.mkdir(parents=True, exist_ok=True)
-        (version_dir / entry).write_text(body, encoding="utf-8")
-        (version_dir / "game").mkdir(exist_ok=True)
-        (version_dir / "game" / "asset.txt").write_text("payload", encoding="utf-8")
-        return version_dir
-
-    return _make
+    return make
 
 
 @pytest.fixture
-def make_version_zip(make_zip):
-    """Build a minimal DoL-shaped zip with an index.html and game/ asset."""
+def make_zip(tmp_path: Path) -> Callable[[str, dict[str, bytes]], Path]:
+    def make(name: str, members: dict[str, bytes]) -> Path:
+        path = tmp_path / name
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for member_name, content in members.items():
+                archive.writestr(member_name, content)
+        return path
 
-    def _make(name: str = "dol.zip", *, entry: str = "index.html") -> Path:
+    return make
+
+
+@pytest.fixture
+def make_version_zip(
+    make_zip: Callable[[str, dict[str, bytes]], Path],
+) -> Callable[..., Path]:
+    def make(
+        name: str = "game.zip",
+        *,
+        entry: str = "index.html",
+        asset: bytes = b"payload",
+    ) -> Path:
         return make_zip(
             name,
             {
-                entry: b"<html><head></head></html>",
-                "game/asset.txt": b"payload",
+                entry: b"<html><head></head><body>game</body></html>",
+                "game/asset.txt": asset,
             },
         )
 
-    return _make
-
-
-# Exposed helper for tests that want to bypass the fixture API
-@pytest.fixture
-def write_zip():
-    return _write_zip
+    return make
 
 
 @pytest.fixture
-def in_memory_zip():
-    """Helper to construct a zip in a BytesIO buffer (used by some assertions)."""
+def make_mod_zip(
+    make_zip: Callable[[str, dict[str, bytes]], Path],
+) -> Callable[..., Path]:
+    def make(
+        name: str = "sample.mod.zip",
+        *,
+        mod_name: str = "Sample",
+        version: str = "1.0",
+        wrapper: str | None = None,
+        extra: dict[str, bytes] | None = None,
+    ) -> Path:
+        prefix = f"{wrapper}/" if wrapper else ""
+        members = {
+            f"{prefix}boot.json": json.dumps(
+                {
+                    "name": mod_name,
+                    "version": version,
+                    "author": "Tester",
+                    "description": "Fixture mod",
+                }
+            ).encode(),
+            f"{prefix}script.js": b"console.log('mod')",
+        }
+        members.update(extra or {})
+        return make_zip(name, members)
 
-    def _build(members: dict[str, bytes]) -> bytes:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for name, data in members.items():
-                zf.writestr(name, data)
-        return buf.getvalue()
-
-    return _build
+    return make

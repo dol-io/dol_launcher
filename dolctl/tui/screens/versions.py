@@ -1,326 +1,244 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Select, Static
 
-from core.models import DolCtlError
-from core.profiles import set_profile_version
-from core.root import load_config, load_state
-from core.versions import (
-    install_from_dir,
-    install_from_file,
-    install_from_remote,
-    list_installed,
-    list_remote_versions,
-    remove_version,
-)
+from core.models import RemoteVersion, RemoveResult
 
 from ..modals import ConfirmModal, InputField, InputModal
-from .base import RefreshableTab, make_progress_reporter
+from .base import RefreshableTab
 
 
 class VersionsTab(RefreshableTab):
     DEFAULT_CSS = """
-    VersionsTab #cols { height: 1fr; }
-    VersionsTab #cols > Vertical { padding-right: 1; }
+    VersionsTab #tables { height: 1fr; }
+    VersionsTab #tables > Vertical { padding-right: 1; }
     VersionsTab DataTable { height: 1fr; }
-    VersionsTab #channel-row { height: auto; padding: 0 0 1 0; }
-    VersionsTab #channel-row Select { width: 30; }
-    VersionsTab #channel-row Button { margin-left: 1; }
+    VersionsTab #source-row,
     VersionsTab #actions { height: auto; padding-top: 1; }
-    VersionsTab #actions Button { margin-right: 1; }
+    VersionsTab #source-row Select { width: 32; }
+    VersionsTab Button { margin-right: 1; }
     """
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._remote: dict[str, RemoteVersion] = {}
+
     def compose(self) -> ComposeResult:
-        with Horizontal(id="cols"):
+        with Horizontal(id="tables"):
             with Vertical():
                 yield Static("[b]Installed versions[/b]")
-                table = DataTable(id="installed-table", cursor_type="row")
-                table.add_columns("id", "channel", "installed_at", "entry")
-                yield table
+                installed: DataTable[str] = DataTable(id="installed", cursor_type="row")
+                installed.add_columns("id", "channel", "name", "installed")
+                yield installed
             with Vertical():
-                yield Static("[b]Remote versions[/b]")
-                with Horizontal(id="channel-row"):
-                    yield Select([], id="channel-select", prompt="(pick channel)")
-                    yield Button("Refresh", id="btn-refresh-remote")
-                remote = DataTable(id="remote-table", cursor_type="row")
-                remote.add_columns("id", "published_at", "asset")
+                yield Static("[b]Remote releases[/b]")
+                with Horizontal(id="source-row"):
+                    yield Select([], prompt="Source", id="source")
+                    yield Button("Load", id="load")
+                remote: DataTable[str] = DataTable(id="remote", cursor_type="row")
+                remote.add_columns("id", "published", "asset")
                 yield remote
         with Horizontal(id="actions"):
-            yield Button("Install latest", id="btn-install-latest", variant="primary")
-            yield Button("Install selected", id="btn-install-remote")
-            yield Button("Install local zip", id="btn-install-zip")
-            yield Button("Install local dir", id="btn-install-dir")
-            yield Button("Use", id="btn-use")
-            yield Button("Remove", id="btn-remove", variant="error")
+            yield Button("Install latest", id="latest", variant="primary")
+            yield Button("Install selected", id="install-remote")
+            yield Button("Import zip", id="import-zip")
+            yield Button("Import directory", id="import-dir")
+            yield Button("Remove", id="remove", variant="error")
 
     def refresh_from_disk(self) -> None:
-        # Installed
-        table = self.query_one("#installed-table", DataTable)
+        snapshot = self.launcher.snapshot()
+        table = self.query_one("#installed", DataTable)
         table.clear()
-        for v in list_installed(self.root):
-            table.add_row(v.id, v.channel, v.installed_at, v.entry, key=v.id)
-        # Channel options
-        config = load_config(self.root)
-        select = self.query_one("#channel-select", Select)
-        options = [(name, name) for name in sorted(config.channels)]
-        select.set_options(options)
+        for version in snapshot.versions:
+            table.add_row(
+                version.id,
+                version.channel,
+                version.display_name,
+                version.installed_at,
+                key=version.id,
+            )
+        select = self.query_one("#source", Select)
+        previous = None if select.is_blank() else str(select.value)
+        names = [name for name, _channel in snapshot.channels]
+        select.set_options([(name, name) for name in names])
+        selected: str | None = None
+        if previous in names:
+            select.value = previous
+            selected = previous
+        elif names:
+            select.value = names[0]
+            selected = names[0]
+        if selected != previous:
+            self._remote.clear()
+            self.query_one("#remote", DataTable).clear()
 
-    # ----- helpers ------------------------------------------------------
+    def _source(self) -> str | None:
+        select = self.query_one("#source", Select)
+        return None if select.is_blank() else str(select.value)
 
-    def _selected_installed(self) -> str | None:
-        table = self.query_one("#installed-table", DataTable)
+    @staticmethod
+    def _selected(table: DataTable) -> str | None:
         if table.row_count == 0:
             return None
-        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
-        return row_key.value if row_key else None
-
-    def _selected_remote(self) -> str | None:
-        table = self.query_one("#remote-table", DataTable)
-        if table.row_count == 0:
-            return None
-        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
-        return row_key.value if row_key else None
-
-    def _selected_channel(self) -> str | None:
-        select = self.query_one("#channel-select", Select)
-        if select.is_blank():
-            return None
-        return str(select.value)
-
-    # ----- handlers -----------------------------------------------------
+        key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        return str(key.value) if key is not None else None
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        bid = event.button.id
-        if bid == "btn-refresh-remote":
-            self._refresh_remote()
-        elif bid == "btn-install-zip":
-            self._install_zip()
-        elif bid == "btn-install-dir":
-            self._install_dir()
-        elif bid == "btn-install-remote":
-            self._install_remote()
-        elif bid == "btn-install-latest":
-            self._install_latest()
-        elif bid == "btn-use":
-            self._use_selected()
-        elif bid == "btn-remove":
-            self._remove_selected()
+        handlers = {
+            "load": self._load,
+            "latest": self._install_latest,
+            "install-remote": self._install_selected,
+            "import-zip": self._import_zip,
+            "import-dir": self._import_directory,
+            "remove": self._remove,
+        }
+        handler = handlers.get(event.button.id or "")
+        if handler is not None:
+            handler()
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        # Auto-refresh the remote list when the user picks a channel —
-        # otherwise the flow needs four steps (pick → Refresh → row → Install)
-        # and the second step is non-obvious.
-        if event.select.id != "channel-select":
+    def _load(self) -> None:
+        source = self._source()
+        if source is None:
+            self.set_status("Select a source first", "warning")
             return
-        if event.value == Select.NULL:
-            return
-        # Skip programmatic resets posted by set_options(...). The widget's
-        # live value matches event.value only when the user actually
-        # changed the selection.
-        if event.select.value != event.value:
-            return
-        self._refresh_remote()
-
-    def _refresh_remote(self) -> None:
-        channel = self._selected_channel()
-        if channel is None:
-            self.set_status("pick a channel first", "warn")
-            return
-        self.set_status(f"fetching remote versions ({channel})…")
-
-        def worker() -> None:
-            try:
-                versions = list_remote_versions(self.root, channel, refresh=True)
-            except Exception as exc:  # noqa: BLE001 — surface HTTP / network errors to user
-                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
-                return
-            self.app.call_from_thread(self._fill_remote_table, channel, versions)
-
-        self.run_worker(worker, exclusive=True, thread=True)
-
-    def _fill_remote_table(self, channel: str, versions) -> None:
-        table = self.query_one("#remote-table", DataTable)
-        table.clear()
-        for v in versions:
-            table.add_row(v.id, v.published_at, v.asset_name, key=v.id)
-        self.set_status(f"loaded {len(versions)} remote version(s) for {channel}", "success")
-
-    def _install_zip(self) -> None:
-        fields = [
-            InputField("file", "Path to .zip", required=True),
-            InputField("as_id", "Version id (optional)"),
-            InputField("channel", "Channel", default="vanilla", required=True),
-            InputField("force", "Force overwrite (y/n)", default="n"),
-        ]
-        self.app.push_screen(InputModal("Install from local zip", fields), self._do_install_zip)
-
-    def _do_install_zip(self, values) -> None:
-        if values is None:
-            return
-        force = values["force"].lower() in {"y", "yes", "true", "1"}
-
-        def worker() -> None:
-            try:
-                vid = install_from_file(
-                    self.root,
-                    Path(values["file"]),
-                    values["as_id"] or None,
-                    values["channel"],
-                    force=force,
-                )
-            except Exception as exc:  # noqa: BLE001 — surface filesystem / extraction errors
-                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
-                return
-            self.app.call_from_thread(self.set_status, f"installed {vid}", "success")
-            self.app.call_from_thread(self.notify_data_changed)
-
-        self.set_status("installing from zip…")
-        self.run_worker(worker, exclusive=True, thread=True)
-
-    def _install_dir(self) -> None:
-        fields = [
-            InputField("dir", "Path to extracted DoL directory", required=True),
-            InputField("as_id", "Version id (optional)"),
-            InputField("channel", "Channel", default="vanilla", required=True),
-            InputField("force", "Force overwrite (y/n)", default="n"),
-        ]
-        self.app.push_screen(InputModal("Install from local directory", fields), self._do_install_dir)
-
-    def _do_install_dir(self, values) -> None:
-        if values is None:
-            return
-        force = values["force"].lower() in {"y", "yes", "true", "1"}
-
-        def worker() -> None:
-            try:
-                vid = install_from_dir(
-                    self.root,
-                    Path(values["dir"]),
-                    values["as_id"] or None,
-                    values["channel"],
-                    force=force,
-                )
-            except Exception as exc:  # noqa: BLE001
-                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
-                return
-            self.app.call_from_thread(self.set_status, f"installed {vid}", "success")
-            self.app.call_from_thread(self.notify_data_changed)
-
-        self.set_status("installing from directory…")
-        self.run_worker(worker, exclusive=True, thread=True)
-
-    def _install_remote(self) -> None:
-        channel = self._selected_channel()
-        if channel is None:
-            self.set_status("pick a channel first", "warn")
-            return
-        selector = self._selected_remote()
-        if selector is None:
-            self.set_status("pick a remote version row first", "warn")
-            return
-        self.app.push_screen(
-            ConfirmModal(
-                f"Download and install '{selector}' from channel '{channel}'?",
-                confirm_label="Install",
-            ),
-            lambda ok: self._do_install_remote(channel, selector, ok),
+        self.run_operation(
+            f"Loading releases from {source}…",
+            lambda: self.launcher.remote_versions(source, refresh=True),
+            self._remote_loaded,
         )
+
+    def _remote_loaded(self, result: object) -> None:
+        assert isinstance(result, list)
+        releases = [item for item in result if isinstance(item, RemoteVersion)]
+        self._remote = {item.id: item for item in releases}
+        table = self.query_one("#remote", DataTable)
+        table.clear()
+        for release in releases:
+            table.add_row(
+                release.id,
+                release.published_at,
+                release.asset_name,
+                key=release.id,
+            )
+        self.set_status(f"Loaded {len(releases)} release(s)", "success")
 
     def _install_latest(self) -> None:
-        """One-click: install the most recently published remote version
-        for the picked channel. Always fetches fresh from the network.
-        """
-        channel = self._selected_channel()
-        if channel is None:
-            self.set_status("pick a channel first", "warn")
+        source = self._source()
+        if source is None:
+            self.set_status("Select a source first", "warning")
             return
+        self._install_remote(source, "latest")
 
-        progress = make_progress_reporter(
-            self.app, self.set_status, f"downloading latest {channel}"
+    def _install_selected(self) -> None:
+        source = self._source()
+        selected = self._selected(self.query_one("#remote", DataTable))
+        if source is None or selected is None:
+            self.set_status("Select a source and release first", "warning")
+            return
+        self._install_remote(source, selected)
+
+    def _install_remote(self, source: str, selector: str) -> None:
+        progress = self.progress_reporter(f"Downloading {selector}")
+        self.run_operation(
+            f"Installing {selector}…",
+            lambda: self.launcher.install_remote_version(
+                source,
+                selector,
+                progress=progress,
+            ),
+            lambda result: self.set_status(f"Installed version {result}", "success"),
+            mutates=True,
         )
 
-        def worker() -> None:
-            try:
-                # ``latest`` selector resolves to the newest published
-                # release inside install_from_remote (see core.versions).
-                vid = install_from_remote(self.root, channel, "latest", progress=progress)
-            except Exception as exc:  # noqa: BLE001 — surface HTTP / extraction errors
-                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
-                return
-            self.app.call_from_thread(self.set_status, f"installed latest: {vid}", "success")
-            self.app.call_from_thread(self.notify_data_changed)
-
-        self.set_status(f"installing latest {channel}…")
-        self.run_worker(worker, exclusive=True, thread=True)
-
-    def _do_install_remote(self, channel: str, selector: str, ok: bool | None) -> None:
-        if not ok:
-            return
-
-        progress = make_progress_reporter(
-            self.app, self.set_status, f"downloading {selector}"
+    def _import_zip(self) -> None:
+        self.app.push_screen(
+            InputModal(
+                "Import version zip",
+                [
+                    InputField("path", "Zip path", required=True),
+                    InputField("id", "Version id (optional)"),
+                    InputField("channel", "Channel label", default="local"),
+                    InputField("force", "Replace existing? y/N", default="n"),
+                ],
+            ),
+            lambda values: self._import_local(values, directory=False),
         )
 
-        def worker() -> None:
-            try:
-                vid = install_from_remote(
-                    self.root, channel, selector, progress=progress
+    def _import_directory(self) -> None:
+        self.app.push_screen(
+            InputModal(
+                "Import extracted version",
+                [
+                    InputField("path", "Directory path", required=True),
+                    InputField("id", "Version id (optional)"),
+                    InputField("channel", "Channel label", default="local"),
+                    InputField("force", "Replace existing? y/N", default="n"),
+                ],
+            ),
+            lambda values: self._import_local(values, directory=True),
+        )
+
+    def _import_local(self, values: dict[str, str] | None, *, directory: bool) -> None:
+        if values is None:
+            return
+        force = values["force"].lower() in {"1", "true", "y", "yes"}
+        source = Path(values["path"])
+
+        def operation() -> str:
+            if directory:
+                return self.launcher.install_version_directory(
+                    source,
+                    version_id=values["id"] or None,
+                    channel=values["channel"] or "local",
+                    force=force,
                 )
-            except Exception as exc:  # noqa: BLE001 — surface HTTP / extraction errors
-                self.app.call_from_thread(self.set_status, f"error: {exc}", "error")
-                return
-            self.app.call_from_thread(self.set_status, f"installed {vid}", "success")
-            self.app.call_from_thread(self.notify_data_changed)
+            return self.launcher.install_version_file(
+                source,
+                version_id=values["id"] or None,
+                channel=values["channel"] or "local",
+                force=force,
+            )
 
-        self.set_status(f"downloading {selector}…")
-        self.run_worker(worker, exclusive=True, thread=True)
+        self.run_operation(
+            "Importing version…",
+            operation,
+            lambda result: self.set_status(f"Installed version {result}", "success"),
+            mutates=True,
+        )
 
-    def _use_selected(self) -> None:
-        version_id = self._selected_installed()
-        if version_id is None:
-            self.set_status("select an installed version first", "warn")
-            return
-        state = load_state(self.root)
-        config = load_config(self.root)
-        profile = state.active_profile or config.default_profile
-        try:
-            set_profile_version(self.root, profile, version_id)
-        except DolCtlError as exc:
-            self.set_status(f"error: {exc}", "error")
-            return
-        self.set_status(f"profile {profile} now uses {version_id}", "success")
-        self.notify_data_changed()
-
-    def _remove_selected(self) -> None:
-        version_id = self._selected_installed()
-        if version_id is None:
-            self.set_status("select an installed version first", "warn")
+    def _remove(self) -> None:
+        selected = self._selected(self.query_one("#installed", DataTable))
+        if selected is None:
+            self.set_status("Select an installed version first", "warning")
             return
         self.app.push_screen(
             ConfirmModal(
-                f"Remove installed version '{version_id}'?",
+                f"Remove version '{selected}' and detach affected instances?",
                 confirm_label="Remove",
             ),
-            lambda ok: self._do_remove(version_id, ok),
+            lambda confirmed: self._remove_confirmed(selected, confirmed),
         )
 
-    def _do_remove(self, version_id: str, ok: bool | None) -> None:
-        if not ok:
+    def _remove_confirmed(self, version_id: str, confirmed: bool | None) -> None:
+        if not confirmed:
             return
-        try:
-            affected = remove_version(self.root, version_id)
-        except DolCtlError as exc:
-            self.set_status(f"error: {exc}", "error")
-            return
-        if affected:
-            self.set_status(
-                f"removed {version_id}; affected profiles: {', '.join(affected)}",
-                "success",
-            )
-        else:
-            self.set_status(f"removed {version_id}", "success")
-        self.notify_data_changed()
+        self.run_operation(
+            f"Removing {version_id}…",
+            lambda: self.launcher.remove_version(version_id, force=True),
+            self._removed,
+            mutates=True,
+        )
+
+    def _removed(self, result: object) -> None:
+        assert isinstance(result, RemoveResult)
+        suffix = (
+            "; detached " + ", ".join(result.affected_profiles)
+            if result.affected_profiles
+            else ""
+        )
+        self.set_status(f"Removed {result.resource_id}{suffix}", "success")

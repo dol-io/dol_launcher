@@ -23,14 +23,6 @@ class ChannelPreset:
 
 
 PRESETS: dict[str, ChannelPreset] = {
-    "dol-vanilla": ChannelPreset(
-        provider="github",
-        repo="Vrelnir/degrees-of-lewdity",
-        # Vanilla releases ship the Twine HTML inside a versioned zip
-        # named "Degrees of Lewdity VERSION.zip".
-        asset_regex=r"Degrees of Lewdity.*\.zip",
-        description="Vanilla Degrees of Lewdity releases from Vrelnir.",
-    ),
     "dol-modloader": ChannelPreset(
         provider="github",
         repo="Lyoko-Jeremie/DoLModLoaderBuild",

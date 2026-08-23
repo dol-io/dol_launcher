@@ -2,23 +2,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Literal
 
 
 class DolCtlError(Exception):
-    pass
+    """Base class for expected, user-facing launcher failures."""
 
 
-@dataclass
+class ValidationError(DolCtlError):
+    """Input or persisted data does not satisfy the launcher contract."""
+
+
+class NotFoundError(DolCtlError):
+    """A requested launcher resource does not exist."""
+
+
+class ConflictError(DolCtlError):
+    """A mutation conflicts with existing launcher state."""
+
+
+class DataError(DolCtlError):
+    """Persisted launcher data is missing, corrupt, or unsupported."""
+
+
+class ExternalError(DolCtlError):
+    """A network, archive, browser, or operating-system operation failed."""
+
+
+ProgressCallback = Callable[[int, int | None], None]
+BuildStatus = Literal["full", "cache-hit"]
+
+
+@dataclass(slots=True)
 class ChannelConfig:
     provider: str = "github"
     repo: str = ""
-    asset_regex: str = ".*\\.zip$"
+    asset_regex: str = r".*\.zip"
     extra: dict[str, str] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(slots=True)
 class Config:
+    schema_version: int = 1
     default_profile: str = "default"
     default_port: int = 8799
     open_browser: bool = True
@@ -26,13 +51,14 @@ class Config:
     channels: dict[str, ChannelConfig] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(slots=True)
 class State:
+    schema_version: int = 1
     active_profile: str = "default"
     last_used_version: str = ""
 
 
-@dataclass
+@dataclass(slots=True)
 class VersionManifest:
     id: str
     display_name: str
@@ -42,31 +68,49 @@ class VersionManifest:
     sha256: str | None
     installed_at: str
     entry: str = "index.html"
+    revision: str = ""
+    schema_version: int = 1
 
 
-@dataclass
+@dataclass(slots=True)
+class InstalledVersion:
+    id: str
+    display_name: str
+    channel: str
+    source: str
+    source_ref: str
+    installed_at: str
+    entry: str
+    revision: str
+    path: Path
+
+
+@dataclass(slots=True)
 class Mod:
     id: str
     name: str
     version: str
     author: str
     description: str
-    source: str  # "local" | "url"
+    source: str
     source_ref: str
     installed_at: str
+    sha256: str
     path: Path
+    schema_version: int = 1
 
 
-@dataclass
+@dataclass(slots=True)
 class Profile:
     name: str
     version_id: str = ""
     mod_order: list[str] = field(default_factory=list)
     port: int | None = None
     open_browser: bool | None = None
+    schema_version: int = 1
 
 
-@dataclass
+@dataclass(slots=True)
 class RemoteVersion:
     id: str
     display_name: str
@@ -78,113 +122,187 @@ class RemoteVersion:
     sha256: str | None = None
 
 
-@dataclass
-class InstalledVersion:
-    id: str
-    display_name: str
-    channel: str
-    source: str
-    source_ref: str
-    installed_at: str
-    entry: str
-    path: Path
-
-
-@dataclass
+@dataclass(frozen=True, slots=True)
 class BuildResult:
     profile: str
     version_id: str
     output_dir: Path
     build_meta_path: Path
+    entry: str
+    build_key: str
+    status: BuildStatus
 
 
-@dataclass
-class RunResult:
-    profile: str
-    url: str
-    port: int
-    output_dir: Path
-    server: Any
-    open_browser: bool
+@dataclass(frozen=True, slots=True)
+class RemoveResult:
+    resource_id: str
+    affected_profiles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DoctorCheck:
+    key: str
+    ok: bool
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class DoctorReport:
+    checks: tuple[DoctorCheck, ...]
+
+    @property
+    def ok(self) -> bool:
+        return all(check.ok for check in self.checks)
 
 
 _RESERVED_CHANNEL_KEYS = {"provider", "repo", "asset_regex"}
 
 
+def _schema(data: dict[str, Any], *, maximum: int = 1) -> int:
+    value = data.get("schema_version", 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise DataError("schema_version must be an integer")
+    if value < 0 or value > maximum:
+        raise DataError(f"Unsupported schema_version: {value}")
+    return value
+
+
+def _string(
+    data: dict[str, Any], key: str, default: str = "", *, required: bool = False
+) -> str:
+    value = data.get(key, default)
+    if not isinstance(value, str):
+        raise DataError(f"{key} must be a string")
+    if required and not value:
+        raise DataError(f"{key} is required")
+    return value
+
+
+def _integer(data: dict[str, Any], key: str, default: int) -> int:
+    value = data.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise DataError(f"{key} must be an integer")
+    return value
+
+
+def _boolean(data: dict[str, Any], key: str, default: bool) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise DataError(f"{key} must be a boolean")
+    return value
+
+
+def _optional_integer(data: dict[str, Any], key: str) -> int | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise DataError(f"{key} must be an integer")
+    return value
+
+
+def _optional_boolean(data: dict[str, Any], key: str) -> bool | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise DataError(f"{key} must be a boolean")
+    return value
+
+
+def _string_list(data: dict[str, Any], key: str) -> list[str]:
+    value = data.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise DataError(f"{key} must be an array of strings")
+    return list(value)
+
+
 def config_from_dict(data: dict[str, Any]) -> Config:
+    _schema(data)
+    raw_channels = data.get("channels", {})
+    if not isinstance(raw_channels, dict):
+        raise DataError("channels must be a table")
     channels: dict[str, ChannelConfig] = {}
-    for name, cfg in (data.get("channels") or {}).items():
-        if isinstance(cfg, dict):
-            extra = {
-                k: str(v)
-                for k, v in cfg.items()
-                if k not in _RESERVED_CHANNEL_KEYS
-            }
-            channels[name] = ChannelConfig(
-                provider=str(cfg.get("provider", "github")),
-                repo=str(cfg.get("repo", "")),
-                asset_regex=str(cfg.get("asset_regex", ".*\\.zip$")),
-                extra=extra,
-            )
+    for name, raw in raw_channels.items():
+        if not isinstance(name, str) or not isinstance(raw, dict):
+            raise DataError("Each channel must be a named table")
+        extra = {
+            str(key): str(value)
+            for key, value in raw.items()
+            if key not in _RESERVED_CHANNEL_KEYS
+        }
+        channels[name] = ChannelConfig(
+            provider=_string(raw, "provider", "github"),
+            repo=_string(raw, "repo"),
+            asset_regex=_string(raw, "asset_regex", r".*\.zip"),
+            extra=extra,
+        )
     return Config(
-        default_profile=str(data.get("default_profile", "default")),
-        default_port=int(data.get("default_port", 8799)),
-        open_browser=bool(data.get("open_browser", True)),
-        index_cache_ttl_seconds=int(data.get("index_cache_ttl_seconds", 600)),
+        schema_version=1,
+        default_profile=_string(data, "default_profile", "default"),
+        default_port=_integer(data, "default_port", 8799),
+        open_browser=_boolean(data, "open_browser", True),
+        index_cache_ttl_seconds=_integer(data, "index_cache_ttl_seconds", 600),
         channels=channels,
     )
 
 
 def config_to_dict(config: Config) -> dict[str, Any]:
     data: dict[str, Any] = {
+        "schema_version": 1,
         "default_profile": config.default_profile,
         "default_port": config.default_port,
         "open_browser": config.open_browser,
         "index_cache_ttl_seconds": config.index_cache_ttl_seconds,
     }
     if config.channels:
-        channels_dict: dict[str, dict[str, Any]] = {}
-        for name, cfg in config.channels.items():
-            entry: dict[str, Any] = {
-                "provider": cfg.provider,
-                "repo": cfg.repo,
-                "asset_regex": cfg.asset_regex,
+        data["channels"] = {
+            name: {
+                "provider": channel.provider,
+                "repo": channel.repo,
+                "asset_regex": channel.asset_regex,
+                **channel.extra,
             }
-            entry.update(cfg.extra)
-            channels_dict[name] = entry
-        data["channels"] = channels_dict
+            for name, channel in config.channels.items()
+        }
     return data
 
 
 def state_from_dict(data: dict[str, Any]) -> State:
+    _schema(data)
     return State(
-        active_profile=str(data.get("active_profile", "default")),
-        last_used_version=str(data.get("last_used_version", "")),
+        schema_version=1,
+        active_profile=_string(data, "active_profile", "default"),
+        last_used_version=_string(data, "last_used_version"),
     )
 
 
 def state_to_dict(state: State) -> dict[str, Any]:
     return {
+        "schema_version": 1,
         "active_profile": state.active_profile,
         "last_used_version": state.last_used_version,
     }
 
 
 def profile_from_dict(data: dict[str, Any]) -> Profile:
+    _schema(data)
     return Profile(
-        name=str(data.get("name", "default")),
-        version_id=str(data.get("version_id", "")),
-        mod_order=list(data.get("mod_order") or []),
-        port=data.get("port"),
-        open_browser=data.get("open_browser"),
+        schema_version=1,
+        name=_string(data, "name", required=True),
+        version_id=_string(data, "version_id"),
+        mod_order=_string_list(data, "mod_order"),
+        port=_optional_integer(data, "port"),
+        open_browser=_optional_boolean(data, "open_browser"),
     )
 
 
 def profile_to_dict(profile: Profile) -> dict[str, Any]:
     data: dict[str, Any] = {
+        "schema_version": 1,
         "name": profile.name,
         "version_id": profile.version_id,
-        "mod_order": profile.mod_order,
+        "mod_order": list(profile.mod_order),
     }
     if profile.port is not None:
         data["port"] = profile.port
@@ -193,22 +311,26 @@ def profile_to_dict(profile: Profile) -> dict[str, Any]:
     return data
 
 
-def mod_from_dict(data: dict[str, Any], path: Path) -> "Mod":
+def mod_from_dict(data: dict[str, Any], path: Path) -> Mod:
+    _schema(data)
     return Mod(
-        id=str(data.get("id", "")),
-        name=str(data.get("name", "")),
-        version=str(data.get("version", "")),
-        author=str(data.get("author", "")),
-        description=str(data.get("description", "")),
-        source=str(data.get("source", "local")),
-        source_ref=str(data.get("source_ref", "")),
-        installed_at=str(data.get("installed_at", "")),
+        schema_version=1,
+        id=_string(data, "id", required=True),
+        name=_string(data, "name", required=True),
+        version=_string(data, "version"),
+        author=_string(data, "author"),
+        description=_string(data, "description"),
+        source=_string(data, "source", "local"),
+        source_ref=_string(data, "source_ref"),
+        installed_at=_string(data, "installed_at"),
+        sha256=_string(data, "sha256"),
         path=path,
     )
 
 
-def mod_to_dict(mod: "Mod") -> dict[str, Any]:
+def mod_to_dict(mod: Mod) -> dict[str, Any]:
     return {
+        "schema_version": 1,
         "id": mod.id,
         "name": mod.name,
         "version": mod.version,
@@ -217,11 +339,29 @@ def mod_to_dict(mod: "Mod") -> dict[str, Any]:
         "source": mod.source,
         "source_ref": mod.source_ref,
         "installed_at": mod.installed_at,
+        "sha256": mod.sha256,
     }
+
+
+def version_manifest_from_dict(data: dict[str, Any]) -> VersionManifest:
+    _schema(data)
+    return VersionManifest(
+        schema_version=1,
+        id=_string(data, "id", required=True),
+        display_name=_string(data, "display_name", required=True),
+        channel=_string(data, "channel", required=True),
+        source=_string(data, "source", required=True),
+        source_ref=_string(data, "source_ref"),
+        sha256=_string(data, "sha256") or None,
+        installed_at=_string(data, "installed_at"),
+        entry=_string(data, "entry", "index.html"),
+        revision=_string(data, "revision"),
+    )
 
 
 def version_manifest_to_dict(manifest: VersionManifest) -> dict[str, Any]:
     return {
+        "schema_version": 1,
         "id": manifest.id,
         "display_name": manifest.display_name,
         "channel": manifest.channel,
@@ -230,19 +370,20 @@ def version_manifest_to_dict(manifest: VersionManifest) -> dict[str, Any]:
         "sha256": manifest.sha256 or "",
         "installed_at": manifest.installed_at,
         "entry": manifest.entry,
+        "revision": manifest.revision,
     }
 
 
-def version_manifest_from_dict(data: dict[str, Any]) -> VersionManifest:
-    return VersionManifest(
-        id=str(data.get("id", "")),
-        display_name=str(data.get("display_name", "")),
-        channel=str(data.get("channel", "")),
-        source=str(data.get("source", "")),
-        source_ref=str(data.get("source_ref", "")),
-        sha256=str(data.get("sha256", "")) or None,
-        installed_at=str(data.get("installed_at", "")),
-        entry=str(data.get("entry", "index.html")),
+def remote_version_from_dict(data: dict[str, Any]) -> RemoteVersion:
+    return RemoteVersion(
+        id=_string(data, "id", required=True),
+        display_name=_string(data, "display_name", required=True),
+        channel=_string(data, "channel", required=True),
+        published_at=_string(data, "published_at"),
+        asset_name=_string(data, "asset_name", required=True),
+        download_url=_string(data, "download_url", required=True),
+        source_ref=_string(data, "source_ref"),
+        sha256=_string(data, "sha256") or None,
     )
 
 
@@ -257,16 +398,3 @@ def remote_version_to_dict(version: RemoteVersion) -> dict[str, Any]:
         "source_ref": version.source_ref,
         "sha256": version.sha256 or "",
     }
-
-
-def remote_version_from_dict(data: dict[str, Any]) -> RemoteVersion:
-    return RemoteVersion(
-        id=str(data.get("id", "")),
-        display_name=str(data.get("display_name", "")),
-        channel=str(data.get("channel", "")),
-        published_at=str(data.get("published_at", "")),
-        asset_name=str(data.get("asset_name", "")),
-        download_url=str(data.get("download_url", "")),
-        source_ref=str(data.get("source_ref", "")),
-        sha256=str(data.get("sha256", "")) or None,
-    )

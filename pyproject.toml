@@ -1,7 +1,7 @@
 [project]
 name = "dolctl"
-version = "0.1.1"
-description = "DoL launcher CLI"
+version = "0.2.0"
+description = "Instance-first Degrees of Lewdity launcher"
 requires-python = ">=3.11"
 dependencies = [
   "typer>=0.12.0",

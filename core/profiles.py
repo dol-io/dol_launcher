@@ -1,106 +1,253 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tomllib
+from typing import Any
 
-from infra.fs import ensure_dir
+from infra.fs import remove_tree
 from infra.toml import read_toml, write_toml
-from core.models import Profile, DolCtlError
-from core.models import profile_from_dict, profile_to_dict
-from .root import load_state, save_state
+
+from .models import (
+    ConflictError,
+    DataError,
+    NotFoundError,
+    Profile,
+    RemoveResult,
+    ValidationError,
+    profile_from_dict,
+    profile_to_dict,
+)
+from .root import (
+    RootLayout,
+    load_state,
+    save_state,
+    validate_port,
+    validate_resource_name,
+)
 
 
-def _profile_dir(root: Path, name: str) -> Path:
-    return root / "profiles" / name
+UNSET: Any = object()
 
 
-def _profile_path(root: Path, name: str) -> Path:
-    return _profile_dir(root, name) / "profile.toml"
+def _profile_file(layout: RootLayout, name: str) -> Path:
+    return layout.profile_dir(name) / "profile.toml"
 
 
-def list_profiles(root: Path) -> list[str]:
-    profiles_dir = root / "profiles"
-    if not profiles_dir.exists():
-        return []
-    return sorted([p.name for p in profiles_dir.iterdir() if p.is_dir()])
+def _read_profile(path: Path) -> Profile:
+    if path.is_symlink():
+        raise DataError(f"Instance manifest cannot be a symlink: {path}")
+    try:
+        return profile_from_dict(read_toml(path))
+    except FileNotFoundError as exc:
+        raise NotFoundError(f"Instance not found: {path.parent.name}") from exc
+    except (OSError, tomllib.TOMLDecodeError, DataError) as exc:
+        raise DataError(f"Cannot read instance manifest {path}: {exc}") from exc
+
+
+def _validate_profile(profile: Profile) -> None:
+    validate_resource_name(profile.name, "instance")
+    if profile.version_id:
+        validate_resource_name(profile.version_id, "version")
+    if profile.port is not None:
+        validate_port(profile.port)
+    if len(profile.mod_order) != len(set(profile.mod_order)):
+        raise ValidationError("An instance cannot contain the same mod twice")
+    for mod_id in profile.mod_order:
+        validate_resource_name(mod_id, "mod")
+
+
+def list_profiles(root: Path) -> list[Profile]:
+    layout = RootLayout.open(root)
+    profiles: list[Profile] = []
+    for directory in sorted(layout.profiles.iterdir(), key=lambda item: item.name):
+        if not directory.is_dir():
+            continue
+        manifest = directory / "profile.toml"
+        if not manifest.exists():
+            continue
+        profile = _read_profile(manifest)
+        if profile.name != directory.name:
+            raise DataError(
+                f"Instance manifest name {profile.name!r} does not match "
+                f"directory {directory.name!r}"
+            )
+        _validate_profile(profile)
+        profiles.append(profile)
+    return profiles
 
 
 def get_profile(root: Path, name: str) -> Profile:
-    path = _profile_path(root, name)
-    if not path.exists():
-        raise DolCtlError(f"Profile not found: {name}")
-    data = read_toml(path)
-    profile = profile_from_dict(data)
-    if not profile.name:
-        profile.name = name
+    layout = RootLayout.open(root)
+    validate_resource_name(name, "instance")
+    profile = _read_profile(_profile_file(layout, name))
+    if profile.name != name:
+        raise DataError(
+            f"Instance manifest name {profile.name!r} does not match directory {name!r}"
+        )
+    _validate_profile(profile)
     return profile
 
 
-def save_profile(root: Path, profile: Profile) -> None:
-    path = _profile_path(root, profile.name)
-    ensure_dir(path.parent)
-    write_toml(path, profile_to_dict(profile))
+def save_profile(root: Path, profile: Profile) -> Profile:
+    layout = RootLayout.open(root)
+    _validate_profile(profile)
+    write_toml(_profile_file(layout, profile.name), profile_to_dict(profile))
+    return profile
 
 
-def create_profile(root: Path, name: str) -> None:
-    path = _profile_path(root, name)
-    if path.exists():
-        raise DolCtlError(f"Profile already exists: {name}")
-    state = load_state(root)
-    profile = Profile(name=name, version_id=state.last_used_version)
-    save_profile(root, profile)
+def active_profile_name(root: Path, requested: str | None = None) -> str:
+    layout = RootLayout.open(root)
+    if requested:
+        name = validate_resource_name(requested, "instance")
+    else:
+        state = load_state(layout.root)
+        name = state.active_profile or "default"
+    get_profile(layout.root, name)
+    return name
 
 
-def set_active_profile(root: Path, name: str) -> None:
-    if not _profile_path(root, name).exists():
-        raise DolCtlError(f"Profile not found: {name}")
-    state = load_state(root)
-    state.active_profile = name
-    save_state(root, state)
+def create_profile(root: Path, name: str, *, version_id: str | None = None) -> Profile:
+    layout = RootLayout.open(root)
+    name = validate_resource_name(name, "instance")
+    destination = layout.profile_dir(name)
+    if destination.exists():
+        raise ConflictError(f"Instance already exists: {name}")
+
+    if version_id is None:
+        candidate = load_state(layout.root).last_used_version
+        version_id = (
+            candidate if candidate and layout.version_dir(candidate).is_dir() else ""
+        )
+    elif version_id:
+        version_id = validate_resource_name(version_id, "version")
+        if not layout.version_dir(version_id).is_dir():
+            raise NotFoundError(f"Version not found: {version_id}")
+
+    profile = Profile(name=name, version_id=version_id or "")
+    return save_profile(layout.root, profile)
 
 
-def set_profile_version(root: Path, profile_name: str, version_id: str) -> None:
-    version_dir = root / "versions" / version_id
-    if not version_dir.exists():
-        raise DolCtlError(f"Version not found: {version_id}")
-    profile = get_profile(root, profile_name)
-    profile.version_id = version_id
-    save_profile(root, profile)
-    state = load_state(root)
-    state.last_used_version = version_id
-    save_state(root, state)
+def select_profile(root: Path, name: str) -> Profile:
+    layout = RootLayout.open(root)
+    profile = get_profile(layout.root, name)
+    state = load_state(layout.root)
+    state.active_profile = profile.name
+    save_state(layout.root, state)
+    return profile
 
 
-def add_mod_to_profile(root: Path, profile_name: str, mod_id: str) -> None:
-    """Append mod_id to the end of the profile's mod_order list."""
-    mod_toml = root / "mods" / mod_id / ".mod.toml"
-    if not mod_toml.exists():
-        raise DolCtlError(f"Mod not found: {mod_id}")
-    profile = get_profile(root, profile_name)
+def configure_profile(
+    root: Path,
+    name: str,
+    *,
+    version_id: str | None | object = UNSET,
+    port: int | None | object = UNSET,
+    open_browser: bool | None | object = UNSET,
+) -> Profile:
+    layout = RootLayout.open(root)
+    profile = get_profile(layout.root, name)
+
+    if version_id is not UNSET:
+        if version_id is None or version_id == "":
+            profile.version_id = ""
+        else:
+            assert isinstance(version_id, str)
+            validate_resource_name(version_id, "version")
+            if not layout.version_dir(version_id).is_dir():
+                raise NotFoundError(f"Version not found: {version_id}")
+            profile.version_id = version_id
+            state = load_state(layout.root)
+            state.last_used_version = version_id
+            save_state(layout.root, state)
+
+    if port is not UNSET:
+        if port is not None:
+            assert isinstance(port, int)
+            validate_port(port)
+        profile.port = port
+
+    if open_browser is not UNSET:
+        if open_browser is not None and not isinstance(open_browser, bool):
+            raise ValidationError("open_browser must be true, false, or unset")
+        profile.open_browser = open_browser
+
+    return save_profile(layout.root, profile)
+
+
+def set_profile_version(root: Path, profile_name: str, version_id: str) -> Profile:
+    return configure_profile(root, profile_name, version_id=version_id)
+
+
+def delete_profile(root: Path, name: str) -> RemoveResult:
+    layout = RootLayout.open(root)
+    name = validate_resource_name(name, "instance")
+    if name == "default":
+        raise ConflictError("The default instance cannot be deleted")
+    get_profile(layout.root, name)
+
+    state = load_state(layout.root)
+    if state.active_profile == name:
+        state.active_profile = "default"
+        save_state(layout.root, state)
+
+    remove_tree(layout.profile_dir(name), within=layout.profiles)
+    remove_tree(layout.runtime_dir(name), within=layout.runtime)
+    return RemoveResult(name)
+
+
+def add_mod_to_profile(root: Path, profile_name: str, mod_id: str) -> Profile:
+    layout = RootLayout.open(root)
+    mod_id = validate_resource_name(mod_id, "mod")
+    if not (layout.mod_dir(mod_id) / ".mod.toml").is_file():
+        raise NotFoundError(f"Mod not found: {mod_id}")
+    profile = get_profile(layout.root, profile_name)
     if mod_id in profile.mod_order:
-        raise DolCtlError(f"Mod already in profile: {mod_id}")
+        raise ConflictError(f"Mod already enabled: {mod_id}")
     profile.mod_order.append(mod_id)
-    save_profile(root, profile)
+    return save_profile(layout.root, profile)
 
 
-def remove_mod_from_profile(root: Path, profile_name: str, mod_id: str) -> None:
-    """Remove mod_id from the profile's mod_order list."""
+def remove_mod_from_profile(root: Path, profile_name: str, mod_id: str) -> Profile:
     profile = get_profile(root, profile_name)
     if mod_id not in profile.mod_order:
-        raise DolCtlError(f"Mod not in profile: {mod_id}")
+        raise NotFoundError(f"Mod is not enabled in {profile_name}: {mod_id}")
     profile.mod_order.remove(mod_id)
-    save_profile(root, profile)
+    return save_profile(root, profile)
 
 
-def reorder_mods(root: Path, profile_name: str, ordered_mod_ids: list[str]) -> None:
-    """Replace mod_order with the given ordered list (all ids must exist in profile)."""
+def reorder_mods(root: Path, profile_name: str, ordered_mod_ids: list[str]) -> Profile:
     profile = get_profile(root, profile_name)
-    current = set(profile.mod_order)
-    requested = set(ordered_mod_ids)
-    if current != requested:
-        raise DolCtlError(
-            f"Reorder list must contain exactly the same mods as the profile.\n"
-            f"  Profile has: {sorted(current)}\n"
-            f"  Provided:    {sorted(requested)}"
+    if len(ordered_mod_ids) != len(set(ordered_mod_ids)):
+        raise ValidationError("Mod order contains duplicates")
+    if set(ordered_mod_ids) != set(profile.mod_order):
+        raise ValidationError(
+            "New mod order must contain exactly the currently enabled mods"
         )
     profile.mod_order = list(ordered_mod_ids)
-    save_profile(root, profile)
+    return save_profile(root, profile)
+
+
+def remove_mod_from_all_profiles(root: Path, mod_id: str) -> tuple[str, ...]:
+    affected: list[str] = []
+    for profile in list_profiles(root):
+        if mod_id not in profile.mod_order:
+            continue
+        profile.mod_order = [item for item in profile.mod_order if item != mod_id]
+        save_profile(root, profile)
+        affected.append(profile.name)
+    return tuple(affected)
+
+
+def clear_version_from_profiles(root: Path, version_id: str) -> tuple[str, ...]:
+    affected: list[str] = []
+    for profile in list_profiles(root):
+        if profile.version_id != version_id:
+            continue
+        profile.version_id = ""
+        save_profile(root, profile)
+        affected.append(profile.name)
+    state = load_state(root)
+    if state.last_used_version == version_id:
+        state.last_used_version = ""
+        save_state(root, state)
+    return tuple(affected)

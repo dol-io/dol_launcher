@@ -1,250 +1,267 @@
-"""
-Mod management module.
-
-Mods are stored as ModLoader-compatible .mod.zip files under mods/<mod_id>/.
-Each mod zip must contain a boot.json at the root level (DoL ModLoader format).
-"""
-
 from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path, PurePosixPath
+import re
 import shutil
+import stat
+import tomllib
 import zipfile
-from pathlib import Path
-from typing import Optional
 
-from infra.fs import ensure_dir, now_iso
+from infra.fs import (
+    calc_sha256,
+    ensure_dir,
+    now_iso,
+    remove_tree,
+    replace_directory,
+    staging_directory,
+)
 from infra.net import download_file, is_url
 from infra.toml import read_toml, write_toml
-from core.models import Mod, DolCtlError, mod_from_dict, mod_to_dict
+from infra.zip import DEFAULT_MAX_MEMBERS, DEFAULT_MAX_UNCOMPRESSED_BYTES
+
+from .models import (
+    ConflictError,
+    DataError,
+    DolCtlError,
+    ExternalError,
+    Mod,
+    NotFoundError,
+    ProgressCallback,
+    RemoveResult,
+    ValidationError,
+    mod_from_dict,
+    mod_to_dict,
+)
+from .profiles import remove_mod_from_all_profiles
+from .root import RootLayout, validate_resource_name
 
 
-def _mod_dir(root: Path, mod_id: str) -> Path:
-    return root / "mods" / mod_id
+def _mod_manifest(layout: RootLayout, mod_id: str) -> Path:
+    return layout.mod_dir(mod_id) / ".mod.toml"
 
 
-def _mod_toml_path(root: Path, mod_id: str) -> Path:
-    return _mod_dir(root, mod_id) / ".mod.toml"
+def _mod_archive(layout: RootLayout, mod_id: str) -> Path:
+    return layout.mod_dir(mod_id) / f"{mod_id}.mod.zip"
 
 
-def _mod_zip_path(root: Path, mod_id: str) -> Path:
-    return _mod_dir(root, mod_id) / f"{mod_id}.mod.zip"
+def _safe_archive_name(name: str) -> PurePosixPath:
+    normalised = name.replace("\\", "/")
+    path = PurePosixPath(normalised)
+    if path.is_absolute() or any(part == ".." for part in path.parts):
+        raise ValidationError(f"Unsafe path in mod archive: {name!r}")
+    if path.parts and ":" in path.parts[0]:
+        raise ValidationError(f"Unsafe drive path in mod archive: {name!r}")
+    return path
 
 
-def _read_boot_json(zip_path: Path) -> dict | None:
-    """Extract and parse boot.json from a mod zip. Returns None if not found."""
+def _inspect_mod_archive(path: Path) -> tuple[dict, str | None]:
     try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            names = zf.namelist()
-            # Support boot.json at root or inside a single top-level directory
-            candidates = [
-                n for n in names if n == "boot.json" or n.endswith("/boot.json")
-            ]
-            if not candidates:
-                return None
-            # Prefer root-level boot.json
-            target = "boot.json" if "boot.json" in candidates else candidates[0]
-            data = zf.read(target)
-            return json.loads(data.decode("utf-8"))
-    except Exception:
-        return None
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+            if len(members) > DEFAULT_MAX_MEMBERS:
+                raise ValidationError("Mod archive contains too many files")
+            if (
+                sum(member.file_size for member in members)
+                > DEFAULT_MAX_UNCOMPRESSED_BYTES
+            ):
+                raise ValidationError("Mod archive is too large when expanded")
+            files: list[str] = []
+            for member in members:
+                _safe_archive_name(member.filename)
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    raise ValidationError(
+                        f"Mod archive contains a symlink: {member.filename!r}"
+                    )
+                if not member.is_dir():
+                    files.append(member.filename.replace("\\", "/"))
 
-
-def _boot_json_location(zip_path: Path) -> str | None:
-    """Return the path of boot.json inside *zip_path*, or None if absent."""
-    try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            names = zf.namelist()
-    except Exception:
-        return None
-    if "boot.json" in names:
-        return "boot.json"
-    nested = [n for n in names if n.endswith("/boot.json")]
-    if not nested:
-        return None
-    # Prefer the shallowest nested path (closest to the root).
-    nested.sort(key=lambda n: n.count("/"))
-    return nested[0]
-
-
-def _flatten_mod_zip(src_zip: Path, dest_zip: Path, strip_prefix: str) -> None:
-    """Copy *src_zip* to *dest_zip*, stripping ``strip_prefix`` from every
-    member name so boot.json lands at the root of the destination zip.
-
-    The DoL ModLoader reads ``boot.json`` from the **root** of each mod
-    zip in ``window.modDataValueZipList``. Mods distributed as
-    ``<ModName-vN>.zip`` carry everything one directory deep — embedding
-    that zip verbatim makes ModLoader silently skip the mod. This helper
-    re-emits a flattened zip so ModLoader can find boot.json.
-    """
-    if not strip_prefix.endswith("/"):
-        strip_prefix = strip_prefix + "/"
-    with zipfile.ZipFile(src_zip, "r") as src, zipfile.ZipFile(
-        dest_zip, "w", zipfile.ZIP_DEFLATED
-    ) as dst:
-        for info in src.infolist():
-            name = info.filename
-            if not name.startswith(strip_prefix):
-                # Member lives outside the prefix; keep as-is so we
-                # don't drop sibling resources users may have shipped.
-                new_name = name
+            if "boot.json" in files:
+                boot_path = "boot.json"
+                wrapper = None
             else:
-                new_name = name[len(strip_prefix):]
-                if not new_name:
-                    # Skip the synthetic top-level directory entry.
-                    continue
-            new_info = zipfile.ZipInfo(filename=new_name, date_time=info.date_time)
-            new_info.compress_type = zipfile.ZIP_DEFLATED
-            new_info.external_attr = info.external_attr
-            dst.writestr(new_info, src.read(info))
+                candidates = [
+                    name
+                    for name in files
+                    if len(PurePosixPath(name).parts) == 2
+                    and PurePosixPath(name).name == "boot.json"
+                ]
+                if len(candidates) != 1:
+                    raise ValidationError(
+                        "Mod archive must contain boot.json at its root or "
+                        "inside one wrapper directory"
+                    )
+                boot_path = candidates[0]
+                wrapper = PurePosixPath(boot_path).parts[0]
+                if any(PurePosixPath(name).parts[0] != wrapper for name in files):
+                    raise ValidationError(
+                        "A wrapped mod archive cannot contain files outside its wrapper"
+                    )
+
+            raw = archive.read(boot_path)
+    except DolCtlError:
+        raise
+    except (OSError, zipfile.BadZipFile, KeyError) as exc:
+        raise ValidationError(f"Cannot read mod archive {path.name}: {exc}") from exc
+
+    try:
+        boot = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValidationError(f"Invalid boot.json in {path.name}: {exc}") from exc
+    if not isinstance(boot, dict):
+        raise ValidationError("boot.json must contain a JSON object")
+    return boot, wrapper
 
 
-def _slugify_mod_id(name: str, fallback_seed: str = "") -> str:
-    """Convert a display name to an ASCII mod_id.
+def _flatten_archive(source: Path, destination: Path, wrapper: str) -> None:
+    prefix = f"{wrapper}/"
+    with (
+        zipfile.ZipFile(source) as input_archive,
+        zipfile.ZipFile(
+            destination, "w", compression=zipfile.ZIP_DEFLATED
+        ) as output_archive,
+    ):
+        for member in input_archive.infolist():
+            name = member.filename.replace("\\", "/")
+            if not name.startswith(prefix):
+                continue
+            flattened = name[len(prefix) :]
+            if not flattened:
+                continue
+            copied = zipfile.ZipInfo(flattened, date_time=member.date_time)
+            copied.compress_type = zipfile.ZIP_DEFLATED
+            copied.external_attr = member.external_attr
+            if member.is_dir():
+                output_archive.writestr(copied, b"")
+            else:
+                output_archive.writestr(copied, input_archive.read(member))
 
-    Non-ASCII characters (CJK, emoji, …) collapse to ``_`` and may strip
-    away entirely. When the result would be empty or generic, use
-    *fallback_seed* (e.g. the zip filename stem) and append a short hash so
-    distinct sources never share the same id.
-    """
-    ascii_only = "".join(c if ord(c) < 128 else "_" for c in name.lower())
-    slug = ascii_only.replace(" ", "_")
-    slug = "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in slug)
-    slug = slug.strip("_")
-    if slug:
-        return slug
-    digest = hashlib.sha1((name or fallback_seed or "mod").encode("utf-8")).hexdigest()[:6]
-    fallback = _slugify_mod_id(fallback_seed) if fallback_seed else ""
-    fallback = fallback or "mod"
-    return f"{fallback}-{digest}"
+
+def _slug(value: str, seed: str) -> str:
+    normalised = re.sub(r"[^a-z0-9._-]+", "-", value.lower()).strip(".-")
+    if not normalised:
+        normalised = "mod"
+    digest = hashlib.sha256((value + "\0" + seed).encode()).hexdigest()[:8]
+    candidate = normalised[:110]
+    if candidate == "mod" or candidate != value.lower():
+        candidate = f"{candidate}-{digest}"
+    return validate_resource_name(candidate, "mod")
+
+
+def _read_mod(layout: RootLayout, mod_id: str) -> Mod:
+    directory = layout.mod_dir(mod_id)
+    manifest_path = directory / ".mod.toml"
+    archive_path = directory / f"{mod_id}.mod.zip"
+    if not directory.is_dir() or not manifest_path.is_file():
+        raise NotFoundError(f"Mod not found: {mod_id}")
+    if manifest_path.is_symlink() or archive_path.is_symlink():
+        raise DataError(f"Mod files cannot be symlinks: {mod_id}")
+    try:
+        mod = mod_from_dict(read_toml(manifest_path), directory)
+    except (OSError, tomllib.TOMLDecodeError, DataError) as exc:
+        raise DataError(f"Cannot read mod manifest {manifest_path}: {exc}") from exc
+    if mod.id != mod_id:
+        raise DataError(f"Mod manifest id {mod.id!r} does not match {mod_id!r}")
+    if not archive_path.is_file():
+        raise DataError(f"Mod archive is missing: {archive_path}")
+    mod.sha256 = mod.sha256 or calc_sha256(archive_path)
+    return mod
+
+
+def get_mod_info(root: Path, mod_id: str) -> Mod:
+    layout = RootLayout.open(root)
+    mod_id = validate_resource_name(mod_id, "mod")
+    return _read_mod(layout, mod_id)
+
+
+def list_mods(root: Path) -> list[Mod]:
+    layout = RootLayout.open(root)
+    mods: list[Mod] = []
+    for directory in sorted(layout.mods.iterdir(), key=lambda item: item.name):
+        if directory.is_dir() and (directory / ".mod.toml").is_file():
+            mods.append(_read_mod(layout, directory.name))
+    return mods
 
 
 def add_mod_from_zip(
     root: Path,
     path_or_url: str,
-    mod_id: Optional[str] = None,
+    mod_id: str | None = None,
+    *,
     force: bool = False,
-    progress=None,
+    progress: ProgressCallback | None = None,
 ) -> str:
-    """
-    Import a ModLoader-format .mod.zip into mods/<mod_id>/.
-
-    - If path_or_url is a URL, the zip is downloaded to .dolctl/cache/downloads/ first.
-    - boot.json inside the zip is parsed for name/version metadata.
-    - When *force* is True, an existing mod directory with the same id is replaced.
-    - When *progress* is given, it is forwarded to ``download_file`` for URL imports.
-    - Returns the mod_id used.
-    """
-    source_ref = path_or_url
-    source = "local"
-
-    if is_url(path_or_url):
-        cache_dir = root / ".dolctl" / "cache" / "downloads"
-        ensure_dir(cache_dir)
-        filename = path_or_url.rstrip("/").split("/")[-1]
-        if not filename.endswith(".zip"):
-            filename += ".zip"
-        dest_path = cache_dir / filename
-        download_file(path_or_url, dest_path, progress=progress)
-        zip_path = dest_path
-        source = "url"
+    layout = RootLayout.open(root)
+    source_kind = "url" if is_url(path_or_url) else "local"
+    if source_kind == "url":
+        cache_key = hashlib.sha256(path_or_url.encode()).hexdigest()[:16]
+        source = layout.download_cache / f"mod-{cache_key}.zip"
+        try:
+            download_file(path_or_url, source, progress=progress)
+        except Exception as exc:
+            raise ExternalError(f"Could not download mod: {exc}") from exc
     else:
-        zip_path = Path(path_or_url).expanduser().resolve()
-        if not zip_path.exists():
-            raise DolCtlError(f"File not found: {zip_path}")
+        source = Path(path_or_url).expanduser().resolve()
+        if not source.is_file():
+            raise NotFoundError(f"Mod archive not found: {source}")
 
-    # Parse boot.json for metadata
-    boot = _read_boot_json(zip_path)
-
-    if boot:
-        name = boot.get("name") or zip_path.stem
-        version = str(boot.get("version") or "")
-        author = str(boot.get("author") or "")
-        description = str(boot.get("description") or "")
-    else:
-        name = zip_path.stem.replace(".mod", "")
-        version = ""
-        author = ""
-        description = ""
-        # Warn but don't block — user may import non-standard zips
-        import warnings
-
-        warnings.warn(
-            f"No boot.json found in {zip_path.name}. "
-            "This may not be a valid DoL ModLoader mod.",
-            stacklevel=2,
+    try:
+        boot, wrapper = _inspect_mod_archive(source)
+        name = str(boot.get("name") or source.stem.replace(".mod", ""))
+        selected_id = (
+            validate_resource_name(mod_id, "mod")
+            if mod_id
+            else _slug(name, source.name)
         )
 
-    if not mod_id:
-        mod_id = _slugify_mod_id(name, fallback_seed=zip_path.stem)
-
-    mod_dir = _mod_dir(root, mod_id)
-    if mod_dir.exists():
-        if not force:
-            raise DolCtlError(
-                f"Mod already exists: {mod_id}. "
-                "Use --force to overwrite or --id to specify a different id."
+        with staging_directory(layout.root, "mods") as workspace:
+            payload = ensure_dir(workspace / "payload")
+            destination_archive = payload / f"{selected_id}.mod.zip"
+            if wrapper is None:
+                shutil.copy2(source, destination_archive)
+            else:
+                _flatten_archive(source, destination_archive, wrapper)
+            _inspect_mod_archive(destination_archive)
+            digest = calc_sha256(destination_archive)
+            mod = Mod(
+                id=selected_id,
+                name=name,
+                version=str(boot.get("version") or ""),
+                author=str(boot.get("author") or ""),
+                description=str(boot.get("description") or ""),
+                source=source_kind,
+                source_ref=path_or_url,
+                installed_at=now_iso(),
+                sha256=digest,
+                path=payload,
             )
-        shutil.rmtree(mod_dir)
-
-    ensure_dir(mod_dir)
-
-    # Copy the zip into the mod directory as <mod_id>.mod.zip. If boot.json
-    # lives inside a top-level directory (common: ``ModName-v1/boot.json``
-    # in user-distributed zips), repackage it with that directory stripped
-    # so ModLoader finds boot.json at the zip root.
-    dest_zip = _mod_zip_path(root, mod_id)
-    boot_path = _boot_json_location(zip_path)
-    if boot_path and boot_path != "boot.json":
-        strip_prefix = boot_path.rsplit("/", 1)[0]
-        _flatten_mod_zip(zip_path, dest_zip, strip_prefix)
-    else:
-        shutil.copy2(zip_path, dest_zip)
-
-    mod = Mod(
-        id=mod_id,
-        name=name,
-        version=version,
-        author=author,
-        description=description,
-        source=source,
-        source_ref=source_ref,
-        installed_at=now_iso(),
-        path=mod_dir,
-    )
-    write_toml(_mod_toml_path(root, mod_id), mod_to_dict(mod))
-    return mod_id
+            write_toml(payload / ".mod.toml", mod_to_dict(mod))
+            try:
+                replace_directory(
+                    payload,
+                    layout.mod_dir(selected_id),
+                    collection=layout.mods,
+                    force=force,
+                )
+            except FileExistsError as exc:
+                raise ConflictError(
+                    f"Mod already exists: {selected_id}; use --force to replace it"
+                ) from exc
+            return selected_id
+    except DolCtlError:
+        raise
+    except Exception as exc:
+        raise ExternalError(f"Could not import mod {source.name}: {exc}") from exc
 
 
-def get_mod_info(root: Path, mod_id: str) -> Mod:
-    """Return Mod metadata for the given mod_id."""
-    toml_path = _mod_toml_path(root, mod_id)
-    if not toml_path.exists():
-        raise DolCtlError(f"Mod not found: {mod_id}")
-    data = read_toml(toml_path)
-    return mod_from_dict(data, _mod_dir(root, mod_id))
-
-
-def list_mods(root: Path) -> list[Mod]:
-    """Return all installed mods sorted by id."""
-    mods_dir = root / "mods"
-    if not mods_dir.exists():
-        return []
-    result: list[Mod] = []
-    for entry in sorted(mods_dir.iterdir()):
-        if not entry.is_dir():
-            continue
-        toml_path = entry / ".mod.toml"
-        if toml_path.exists():
-            data = read_toml(toml_path)
-            result.append(mod_from_dict(data, entry))
-    return result
-
-
-def remove_mod(root: Path, mod_id: str) -> None:
-    """Delete a mod and its files from mods/<mod_id>/."""
-    mod_dir = _mod_dir(root, mod_id)
-    if not mod_dir.exists():
-        raise DolCtlError(f"Mod not found: {mod_id}")
-    shutil.rmtree(mod_dir)
+def remove_mod(root: Path, mod_id: str) -> RemoveResult:
+    layout = RootLayout.open(root)
+    mod_id = validate_resource_name(mod_id, "mod")
+    get_mod_info(layout.root, mod_id)
+    affected = remove_mod_from_all_profiles(layout.root, mod_id)
+    try:
+        remove_tree(layout.mod_dir(mod_id), within=layout.mods)
+    except (OSError, ValueError) as exc:
+        raise ExternalError(f"Could not remove mod {mod_id}: {exc}") from exc
+    return RemoveResult(mod_id, affected)

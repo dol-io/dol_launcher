@@ -2,267 +2,219 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import re
-from pathlib import Path
 import json
-import os
-import shutil
+from pathlib import Path
+import re
 
+from infra.fs import (
+    atomic_write_text,
+    copy_tree,
+    ensure_dir,
+    now_iso,
+    replace_directory,
+    staging_directory,
+)
+
+from .models import (
+    BuildResult,
+    BuildStatus,
+    DataError,
+    DolCtlError,
+    ExternalError,
+    NotFoundError,
+)
+from .mods import get_mod_info
 from .profiles import get_profile
-from infra.fs import ensure_dir, safe_rmtree, now_iso
-from infra.log import get_logger
-from infra.toml import read_toml
-from core.models import BuildResult, DolCtlError, version_manifest_from_dict
-
-logger = get_logger(__name__)
-
-IGNORED_FILES = {".manifest.toml"}
-
-# Regex used by Lyra / DoL ModLoader to locate the mod list in the HTML.
-_MOD_LIST_PATTERN = r"window\.modDataValueZipList\s*=\s*(\[.*?\]);"
-
-_BUILD_META_SCHEMA = 2
+from .root import RootLayout
+from .versions import get_installed
 
 
-def _copy_tree(src: Path, dest: Path) -> None:
-    for root_dir, _dirs, files in os.walk(src):
-        root_path = Path(root_dir)
-        rel_root = root_path.relative_to(src)
-        for filename in files:
-            if filename in IGNORED_FILES:
-                continue
-            src_file = root_path / filename
-            rel_path = rel_root / filename if str(rel_root) != "." else Path(filename)
-            dest_file = dest / rel_path
-            dest_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_file, dest_file)
+BUILD_META_SCHEMA = 3
+IGNORED_VERSION_FILES = {".manifest.toml"}
+_MOD_LIST = re.compile(
+    r"window\.modDataValueZipList\s*=\s*(\[.*?\]);",
+    re.DOTALL,
+)
 
 
-def _find_entry_html(merged_dir: Path, base_dir: Path) -> Path:
-    """Resolve the entry HTML file inside *merged_dir*.
-
-    Uses the version manifest ``entry`` field when available, otherwise
-    falls back to glob-matching ``*.html`` at the root level.
-    """
-    manifest_path = base_dir / ".manifest.toml"
-    if manifest_path.exists():
-        manifest = version_manifest_from_dict(read_toml(manifest_path))
-        entry_name = manifest.entry
-    else:
-        entry_name = "index.html"
-
-    html_path = merged_dir / entry_name
-    if html_path.exists():
-        return html_path
-
-    # Fallback: first .html at root
-    html_files = sorted(merged_dir.glob("*.html"))
-    if html_files:
-        return html_files[0]
-
-    raise DolCtlError("No HTML entry file found in the built version.")
+def _encode_mod(path: Path) -> str:
+    return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-# ---------------------------------------------------------------------------
-# ModLoader injection (base64-embed approach, matching Lyra)
-# ---------------------------------------------------------------------------
-
-
-def _read_mod_as_base64(zip_path: Path) -> str:
-    """Read a ``.mod.zip`` file and return its content as a base64 string."""
-    return base64.b64encode(zip_path.read_bytes()).decode("ascii")
-
-
-def _inject_mods_into_html(html_path: Path, mod_zips: list[Path]) -> None:
-    """Inject mod zips into the HTML's ``window.modDataValueZipList``.
-
-    Follows Lyra's ``ModInjector.add_mods`` strategy: each mod zip is
-    base64-encoded and appended to the JavaScript array
-    ``window.modDataValueZipList`` that the DoL ModLoader reads at startup.
-
-    If the HTML already contains the array (ModLoader / Lyra builds), the
-    new entries are appended. If not (vanilla builds), the array is created
-    inside a new ``<script>`` block before ``</head>``.
-    """
+def _inject_mods_into_html(html_path: Path, mod_archives: list[Path]) -> None:
     content = html_path.read_text(encoding="utf-8")
-
-    new_entries: list[str] = []
-    for zp in mod_zips:
-        logger.info("  Embedding mod: %s", zp.name)
-        new_entries.append(_read_mod_as_base64(zp))
-
-    match = re.search(_MOD_LIST_PATTERN, content, re.DOTALL)
-
-    if match:
-        existing_list: list[str] = json.loads(match.group(1))
-        existing_list.extend(new_entries)
-        replacement = f"window.modDataValueZipList = {json.dumps(existing_list)};"
-        content = content[: match.start()] + replacement + content[match.end():]
-    else:
-        script_block = (
-            '<script type="text/javascript">'
-            f"window.modDataValueZipList = {json.dumps(new_entries)};"
-            "</script>"
+    encoded = [_encode_mod(path) for path in mod_archives]
+    match = _MOD_LIST.search(content)
+    if match is not None:
+        try:
+            existing = json.loads(match.group(1))
+        except json.JSONDecodeError as exc:
+            raise DataError(
+                "The base game's window.modDataValueZipList is not valid JSON"
+            ) from exc
+        if not isinstance(existing, list) or not all(
+            isinstance(item, str) for item in existing
+        ):
+            raise DataError("The base game's mod list must be an array of strings")
+        combined = existing + encoded
+        replacement = (
+            "window.modDataValueZipList = "
+            + json.dumps(combined, separators=(",", ":"))
+            + ";"
         )
-        if "</head>" in content:
-            content = content.replace("</head>", script_block + "\n</head>", 1)
-        else:
-            content = script_block + "\n" + content
-
-    html_path.write_text(content, encoding="utf-8")
-    logger.info("  Injected %d mod(s) into %s", len(new_entries), html_path.name)
-
-
-# ---------------------------------------------------------------------------
-# Incremental build bookkeeping
-# ---------------------------------------------------------------------------
-
-
-def _mod_fingerprint(
-    zip_path: Path, previous: dict[str, object] | None
-) -> dict[str, object]:
-    """Return ``{id, mtime_ns, size, sha256}`` for *zip_path*.
-
-    Reuses ``previous['sha256']`` when ``mtime_ns`` and ``size`` are
-    unchanged so the typical incremental rebuild touches no mod bytes.
-    """
-    stat = zip_path.stat()
-    if (
-        previous is not None
-        and previous.get("mtime_ns") == stat.st_mtime_ns
-        and previous.get("size") == stat.st_size
-        and previous.get("sha256")
-    ):
-        sha256 = str(previous["sha256"])
+        content = content[: match.start()] + replacement + content[match.end() :]
     else:
-        hasher = hashlib.sha256()
-        with zip_path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                hasher.update(chunk)
-        sha256 = hasher.hexdigest()
-    return {
-        "id": zip_path.parent.name,
-        "mtime_ns": stat.st_mtime_ns,
-        "size": stat.st_size,
-        "sha256": sha256,
-    }
+        script = (
+            '<script id="dolctl-mods" type="text/javascript">'
+            "window.modDataValueZipList = "
+            + json.dumps(encoded, separators=(",", ":"))
+            + ";</script>"
+        )
+        closing_head = re.search(r"</head\s*>", content, re.IGNORECASE)
+        if closing_head is None:
+            content = script + "\n" + content
+        else:
+            content = (
+                content[: closing_head.start()]
+                + script
+                + "\n"
+                + content[closing_head.start() :]
+            )
+    atomic_write_text(html_path, content)
 
 
-def _load_meta(path: Path) -> dict | None:
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+def _build_key(version_revision: str, mods: list[tuple[str, str]]) -> str:
+    canonical = json.dumps(
+        {
+            "version_revision": version_revision,
+            "mods": [{"id": mod_id, "sha256": sha256} for mod_id, sha256 in mods],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _mod_order_matches(prev_entries: list[dict], current: list[dict]) -> bool:
-    if len(prev_entries) != len(current):
-        return False
-    for a, b in zip(prev_entries, current):
-        if a.get("id") != b.get("id"):
-            return False
-        if a.get("sha256") != b.get("sha256"):
-            return False
-    return True
-
-
-def build_runtime(
-    root: Path, profile_name: str, clean: bool = False
-) -> BuildResult:
-    """Build the runtime directory for *profile_name*.
-
-    Skips work when the existing ``runtime/<profile>/merged`` already
-    matches the requested version and mod set. Pass ``clean=True`` to force
-    a full rebuild.
-    """
+def expected_build_key(root: Path, profile_name: str) -> str:
+    """Return the build key for the instance's current immutable inputs."""
     profile = get_profile(root, profile_name)
     if not profile.version_id:
-        raise DolCtlError(f"Profile has no version set: {profile_name}")
+        raise NotFoundError(f"Instance has no version selected: {profile_name}")
+    version = get_installed(root, profile.version_id)
+    mods = [(mod_id, get_mod_info(root, mod_id).sha256) for mod_id in profile.mod_order]
+    return _build_key(version.revision, mods)
 
-    base_dir = root / "versions" / profile.version_id
-    if not base_dir.exists():
-        raise DolCtlError(f"Version not found: {profile.version_id}")
 
-    runtime_dir = root / "runtime" / profile_name
-    merged_dir = runtime_dir / "merged"
-    build_meta_path = runtime_dir / "build_meta.json"
-    previous_meta = None if clean else _load_meta(build_meta_path)
+def _read_meta(path: Path) -> dict | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or data.get("schema_version") != BUILD_META_SCHEMA:
+        return None
+    return data
 
-    # Compute the desired state ----------------------------------------------
-    mod_zip_paths: list[Path] = []
-    previous_mods_by_id: dict[str, dict] = {}
-    if previous_meta and isinstance(previous_meta.get("mod_order"), list):
-        for item in previous_meta["mod_order"]:
-            if isinstance(item, dict) and "id" in item:
-                previous_mods_by_id[item["id"]] = item
 
-    for mod_id in profile.mod_order:
-        src_zip = root / "mods" / mod_id / f"{mod_id}.mod.zip"
-        if not src_zip.exists():
-            raise DolCtlError(
-                f"Mod zip not found for '{mod_id}': {src_zip}\n"
-                "The mod may have been deleted. Remove it from the profile first."
-            )
-        mod_zip_paths.append(src_zip)
-
-    current_mod_entries = [
-        _mod_fingerprint(p, previous_mods_by_id.get(p.parent.name))
-        for p in mod_zip_paths
-    ]
-
-    # Decide which sections of the build can be skipped ----------------------
-    need_copy = (
-        clean
-        or previous_meta is None
-        or previous_meta.get("base_version_id") != profile.version_id
-        or not merged_dir.exists()
-    )
-    need_inject = need_copy or not _mod_order_matches(
-        previous_meta.get("mod_order", []) if previous_meta else [],
-        current_mod_entries,
-    )
-
-    logger.info(
-        "Building profile %s from version %s (%d mod(s)) — %s",
-        profile_name,
-        profile.version_id,
-        len(profile.mod_order),
-        "full" if need_copy else ("inject-only" if need_inject else "cache hit"),
-    )
-
-    if need_copy:
-        safe_rmtree(merged_dir)
-        ensure_dir(merged_dir)
-        _copy_tree(base_dir, merged_dir)
-    elif need_inject:
-        # Refresh the entry HTML from the pristine version so subsequent
-        # injection works from a clean base, regardless of how the previous
-        # injection mutated the file.
-        entry_html_in_base = _find_entry_html(base_dir, base_dir)
-        rel_entry = entry_html_in_base.relative_to(base_dir)
-        target = merged_dir / rel_entry
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(entry_html_in_base, target)
-
-    if need_inject and mod_zip_paths:
-        html_path = _find_entry_html(merged_dir, base_dir)
-        _inject_mods_into_html(html_path, mod_zip_paths)
-
-    # Write build meta -------------------------------------------------------
-    build_meta = {
-        "schema_version": _BUILD_META_SCHEMA,
-        "base_version_id": profile.version_id,
-        "mod_order": current_mod_entries,
-        "built_at": now_iso(),
-    }
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    build_meta_path.write_text(json.dumps(build_meta, indent=2), encoding="utf-8")
-
+def _result(
+    layout: RootLayout,
+    profile_name: str,
+    version_id: str,
+    entry: str,
+    key: str,
+    status: BuildStatus,
+) -> BuildResult:
+    runtime = layout.runtime_dir(profile_name)
     return BuildResult(
         profile=profile_name,
-        version_id=profile.version_id,
-        output_dir=merged_dir,
-        build_meta_path=build_meta_path,
+        version_id=version_id,
+        output_dir=runtime / "merged",
+        build_meta_path=runtime / "build_meta.json",
+        entry=entry,
+        build_key=key,
+        status=status,
+    )
+
+
+def build_runtime(root: Path, profile_name: str, *, clean: bool = False) -> BuildResult:
+    layout = RootLayout.open(root)
+    profile = get_profile(layout.root, profile_name)
+    if not profile.version_id:
+        raise NotFoundError(f"Instance has no version selected: {profile_name}")
+    version = get_installed(layout.root, profile.version_id)
+
+    mods: list[tuple[str, str, Path]] = []
+    for mod_id in profile.mod_order:
+        mod = get_mod_info(layout.root, mod_id)
+        archive = mod.path / f"{mod.id}.mod.zip"
+        mods.append((mod.id, mod.sha256, archive))
+
+    key = _build_key(version.revision, [(item[0], item[1]) for item in mods])
+    runtime = layout.runtime_dir(profile.name)
+    merged = runtime / "merged"
+    metadata = runtime / "build_meta.json"
+    previous = None if clean else _read_meta(metadata)
+    if (
+        previous is not None
+        and previous.get("build_key") == key
+        and (merged / version.entry).is_file()
+    ):
+        return _result(
+            layout,
+            profile.name,
+            version.id,
+            version.entry,
+            key,
+            "cache-hit",
+        )
+
+    try:
+        with staging_directory(layout.root, "builds") as workspace:
+            staged_runtime = ensure_dir(workspace / "runtime")
+            staged_merged = ensure_dir(staged_runtime / "merged")
+            copy_tree(
+                version.path,
+                staged_merged,
+                ignored_names=IGNORED_VERSION_FILES,
+            )
+            entry = staged_merged / version.entry
+            if not entry.is_file():
+                raise DataError(f"Built entry HTML is missing: {version.entry}")
+            if mods:
+                _inject_mods_into_html(entry, [item[2] for item in mods])
+
+            build_meta = {
+                "schema_version": BUILD_META_SCHEMA,
+                "profile": profile.name,
+                "base_version_id": version.id,
+                "version_revision": version.revision,
+                "entry": version.entry,
+                "build_key": key,
+                "mod_order": [
+                    {"id": mod_id, "sha256": sha256}
+                    for mod_id, sha256, _archive in mods
+                ],
+                "built_at": now_iso(),
+            }
+            atomic_write_text(
+                staged_runtime / "build_meta.json",
+                json.dumps(build_meta, indent=2) + "\n",
+            )
+            replace_directory(
+                staged_runtime,
+                runtime,
+                collection=layout.runtime,
+                force=True,
+            )
+    except DolCtlError:
+        raise
+    except Exception as exc:
+        raise ExternalError(f"Could not build instance {profile.name}: {exc}") from exc
+
+    return _result(
+        layout,
+        profile.name,
+        version.id,
+        version.entry,
+        key,
+        "full",
     )
