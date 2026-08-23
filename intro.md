@@ -68,7 +68,22 @@ selects `default`.
 Complex dependency resolution and automatic compatibility solving are not in
 scope. Load order is explicit and controlled by the user.
 
-### 2.5 Build and launch
+### 2.5 Imagepacks
+
+- Keep reviewed imagepack recipes separate from configurable game and Mod
+  release channels.
+- For `dolp-mysterious-ucb`, resolve the latest commit affecting DOLP's
+  `imagepacks/mysterious` tree, then download that subtree pinned to the
+  resolved commit.
+- Package its images under `img/` with a generated ModLoader `boot.json`, an
+  `imgFileList`, and the ImageLoaderHook addon/dependency declaration.
+- Publish the result through the normal Mods library with source kind
+  `imagepack` and the pinned commit URL. Users then enable and order it exactly
+  like another Mod.
+- Do not unpack and repackage AU assets. Female, male, and androgynous AU model
+  templates install their official release zips directly.
+
+### 2.6 Build and launch
 
 - Build `runtime/<instance>/merged` from the selected immutable version.
 - Embed enabled mod zips in order into
@@ -81,7 +96,7 @@ scope. Load order is explicit and controlled by the user.
 - Respect browser preference in the order command override, instance setting,
   global setting.
 
-### 2.6 Diagnostics
+### 2.7 Diagnostics
 
 One shared doctor use case reports:
 
@@ -150,8 +165,8 @@ These rules are acceptance requirements, not implementation suggestions:
    before replacing the previous directory. A failed force replacement keeps
    the previous installation usable.
 5. Downloaded data is written to `.part` and renamed only after success.
-6. Zip extraction rejects absolute paths and traversal, and enforces sensible
-   member-count and uncompressed-size limits.
+6. Zip and tar extraction reject absolute paths, traversal, links, and special
+   files, and enforce sensible member-count and uncompressed-size limits.
 7. Expected external failures are translated to a `DolCtlError` subtype with a
    user-readable message; details remain available through exception chaining
    and logs.
@@ -176,14 +191,23 @@ asset_regex = "DoL-ModLoader-.*\\.zip"
 
 Channels are typed as `game` or `mod`, so an archive can only enter the
 matching installer. Missing `kind` fields from older configurations read as
-`game`. Built-in presets are static, reviewed GitHub Releases sources rather
-than a remotely controlled marketplace. A fresh ROOT configures the
-`dol-modloader` game preset; the opt-in presets are `dol-modloader-zh` for a
-localised game build and `dol-image-pack`, `dol-i18n-zh`, `doli`,
-`cheat-lyra`, `combat-status-display-lyra`, `au-female-model-058`,
-`ausdol-facial-expansion`, and `ucb` for Mods. Compatibility-specific presets
-may intentionally narrow their asset regex; the launcher does not infer game
-and Mod compatibility.
+`game`. CLI source templates are static, reviewed GitHub Releases sources
+rather than a remotely controlled marketplace. A fresh ROOT configures the
+`dol-modloader` game template. The optional game templates are
+`dol-modloader-zh` and `dol-lyra-besc-ucb`; the latter selects Lyra's complete
+BESC+UCB game build and must never enter the Mod installer. The TUI's
+**Mod sources** catalog contains only independently installable Mod archives:
+`dol-image-pack`, `dol-i18n-zh`, `doli`, `cheat-lyra`,
+`combat-status-display-lyra`, `au-female-model-058`, `au-male-model-058`,
+`au-androgynous-model-058`, and `ausdol-facial-expansion`. The AU templates
+select the official female 0.8.x, male 0.3.x, and androgynous 0.0.x model zips
+for DoL 0.5.8.x. The outdated `site098/mysterious` Release is not a reviewed
+source. Lyra currently integrates UCB into complete game archives instead of
+publishing it as a standalone Mod. The separate `dolp-mysterious-ucb`
+imagepack recipe therefore builds a local ModLoader package from DOLP's raw
+GitLab repository subtree and records the exact source commit. Compatibility-
+specific templates may intentionally narrow their asset regex; the launcher
+does not infer game and Mod compatibility.
 
 `.dolctl/state.toml`:
 
@@ -239,6 +263,9 @@ dolctl mod install [<selector>] --channel <name> [--id <id>] [--force]
 dolctl mod info <id>
 dolctl mod remove <id>
 
+dolctl imagepack list
+dolctl imagepack install <recipe> [--id <mod-id>] [--force]
+
 dolctl channel list
 dolctl channel add <name> (--preset <name> | --repo <owner/repo>)
                    [--kind game|mod]
@@ -263,10 +290,15 @@ resource tabs:
    Launch/Stop/Build. Creating an instance, changing launch settings, and
    selecting or ordering mods happen in focused dialogs rather than inline in
    the overview.
-2. **Library** — manage Versions, Mods, and Sources as three related sections.
-   Version and Mod views only offer sources of their matching type; the Mods
-   view can install the latest release from a configured Mod source. Library
-   operations are supporting tasks, not peers of the normal launch flow.
+2. **Library** — manage Versions, Mods, Imagepacks, and Mod sources as four
+   related sections. The Imagepacks section lists reviewed raw-source recipes
+   and builds the selected recipe into the Mods library. The Mod sources
+   section shows and edits only `mod` channels and offers a reviewed catalog
+   without exposing the internal CLI `preset` terminology. Version and Mod
+   views only offer sources of their matching type; the Mods view can install
+   the latest release from a configured Mod source. Game-source customization
+   remains available through the CLI. Library operations are supporting tasks,
+   not peers of the normal launch flow.
 3. **System** — inspect ROOT information and the shared doctor report.
 
 Highlighting an instance only changes the local view. Mutations use explicit
@@ -291,8 +323,8 @@ DTOs.
 ```text
 dolctl/       Typer and Textual adapters only
 core/         models, validation, use cases, build and launch orchestration
-infra/        filesystem, TOML, zip, network, logging, browser adapters
-providers/    concrete remote release providers
+infra/        filesystem, TOML, archive, network, logging, browser adapters
+providers/    concrete remote release and repository providers
 ```
 
 `core.launcher.Launcher` is the facade used by both frontends. Feature modules
@@ -321,5 +353,6 @@ End-to-end acceptance covers:
 6. launch/serve the entry over loopback;
 7. reject traversal/absolute ids without touching files outside ROOT;
 8. inject failures during replacement and retain the previous installation;
-9. mount and navigate every TUI workspace and Library section;
-10. import `dolctl.cli` without importing `textual`.
+9. package a pinned raw imagepack subtree into a valid ImageLoader Mod;
+10. mount and navigate every TUI workspace and Library section;
+11. import `dolctl.cli` without importing `textual`.

@@ -28,6 +28,13 @@ def _is_symlink(info: zipfile.ZipInfo) -> bool:
     return stat.S_ISLNK(info.external_attr >> 16)
 
 
+def _is_special_file(info: zipfile.ZipInfo) -> bool:
+    if info.create_system != 3:
+        return False
+    file_type = stat.S_IFMT(info.external_attr >> 16)
+    return file_type not in {0, stat.S_IFREG, stat.S_IFDIR, stat.S_IFLNK}
+
+
 def extract_zip(
     source: Path,
     destination: Path,
@@ -49,6 +56,10 @@ def extract_zip(
         for member in members:
             if _is_symlink(member):
                 raise ValueError(f"Zip contains a symlink: {member.filename!r}")
+            if _is_special_file(member):
+                raise ValueError(
+                    f"Zip contains a special file: {member.filename!r}"
+                )
             target = _safe_member_path(destination, member.filename)
             if member.is_dir():
                 target.mkdir(parents=True, exist_ok=True)

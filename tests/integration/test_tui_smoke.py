@@ -5,15 +5,16 @@ import re
 
 import pytest
 from rich.color import ColorType
-from textual.widgets import Button, DataTable, Input, OptionList, Static
+from textual.widgets import Button, DataTable, Input, ListView, OptionList, Static
 
 from core.launcher import Launcher
 from dolctl.tui.app import DolctlApp
 from dolctl.tui.modals import ModManagerModal
+from dolctl.tui.screens.imagepacks import ImagepacksTab
 from dolctl.tui.screens.instances import InstancesTab
 from dolctl.tui.screens.library import LibraryScreen
 from dolctl.tui.screens.mods import ModsTab
-from dolctl.tui.screens.sources import SourcesTab
+from dolctl.tui.screens.sources import ModSourceItem, SourcesTab
 from dolctl.tui.screens.system import SystemTab
 from dolctl.tui.screens.versions import VersionsTab
 from dolctl.tui.theme import ANSI_16_COLOURS, TERMINAL_CSS, TERMINAL_THEME
@@ -49,7 +50,7 @@ async def test_app_mounts_and_navigates_the_three_workspaces(
         await pilot.press("2")
         assert app.query_one("#library-page").has_class("-current")
         library = app.query_one(LibraryScreen)
-        for section in ("versions", "mods", "sources"):
+        for section in ("versions", "mods", "imagepacks", "sources"):
             library.show_section(section)
             await pilot.pause()
             assert app.query_one(f"#{section}-section").has_class("-current")
@@ -59,7 +60,13 @@ async def test_app_mounts_and_navigates_the_three_workspaces(
             app.query_one(VersionsTab).query_one("#installed", DataTable).row_count == 1
         )
         assert app.query_one(ModsTab).query_one("#mods", DataTable).row_count == 1
-        assert app.query_one(SourcesTab).query_one("#sources", DataTable).row_count == 1
+        assert (
+            app.query_one(ImagepacksTab)
+            .query_one("#imagepacks", DataTable)
+            .row_count
+            == 1
+        )
+        assert app.query_one(SourcesTab).query_one("#sources", DataTable).row_count == 0
 
         await pilot.click("#nav-system")
         assert app.query_one("#system-page").has_class("-current")
@@ -180,6 +187,34 @@ async def test_library_filters_game_and_mod_sources(launcher: Launcher) -> None:
         mod_source = app.query_one("#mod-source")
         assert str(version_source.value) == "modloader"
         assert str(mod_source.value) == "image-pack"
+
+        app.open_library("sources")
+        await pilot.pause()
+        sources = app.query_one(SourcesTab)
+        assert sources.query_one("#sources", DataTable).row_count == 1
+        assert sources.query_one("#sources", DataTable).border_title.strip() == (
+            "Configured Mod sources"
+        )
+
+        catalog = sources.query_one("#mod-source-catalog", ListView)
+        keys = [
+            item.source_key
+            for item in catalog.children
+            if isinstance(item, ModSourceItem)
+        ]
+        assert keys == [key for key, _preset in launcher.channel_presets(kind="mod")]
+        assert "dol-modloader" not in keys
+        assert "dol-lyra-besc-ucb" not in keys
+        assert catalog.border_title.strip() == "Mod sources"
+        assert str(sources.query_one("#add-source", Button).label) == "Add source"
+
+        app.open_library("imagepacks")
+        await pilot.pause()
+        imagepacks = app.query_one(ImagepacksTab)
+        assert imagepacks.query_one("#imagepacks", DataTable).row_count == 1
+        assert str(imagepacks.query_one("#install-imagepack", Button).label) == (
+            "Build & install"
+        )
 
 
 @pytest.mark.asyncio

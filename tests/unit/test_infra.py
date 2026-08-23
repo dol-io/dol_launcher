@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 from pathlib import Path
 import stat
+import tarfile
 import threading
 import zipfile
 
 import pytest
 
 from infra.net import download_file, is_url
+from infra.tar import _safe_member_path as _safe_tar_member_path
+from infra.tar import extract_tar
 from infra.zip import _safe_member_path, extract_zip
 
 
@@ -67,6 +71,45 @@ def test_extract_zip_rejects_symlinks(tmp_path: Path) -> None:
         handle.writestr(info, "target")
     with pytest.raises(ValueError, match="symlink"):
         extract_zip(archive, tmp_path / "out")
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["../escape", "a/../../escape", "/etc/passwd", "C:/Windows/system32"],
+)
+def test_tar_member_rejects_escape(tmp_path: Path, name: str) -> None:
+    with pytest.raises(ValueError):
+        _safe_tar_member_path(tmp_path, name)
+
+
+def _add_tar_file(archive: tarfile.TarFile, name: str, content: bytes) -> None:
+    info = tarfile.TarInfo(name)
+    info.size = len(content)
+    archive.addfile(info, io.BytesIO(content))
+
+
+def test_extract_tar_flattens_single_wrapper(tmp_path: Path) -> None:
+    source = tmp_path / "wrapped.tar.gz"
+    with tarfile.open(source, "w:gz") as archive:
+        _add_tar_file(archive, "release/assets/image.png", b"image")
+    destination = tmp_path / "tar-out"
+    extract_tar(source, destination, strip_single_dir=True)
+    assert (destination / "assets" / "image.png").read_bytes() == b"image"
+    assert not (destination / "release").exists()
+
+
+def test_extract_tar_validates_all_members_before_writing(tmp_path: Path) -> None:
+    source = tmp_path / "unsafe.tar.gz"
+    with tarfile.open(source, "w:gz") as archive:
+        _add_tar_file(archive, "release/safe.png", b"image")
+        link = tarfile.TarInfo("release/link")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../outside"
+        archive.addfile(link)
+    destination = tmp_path / "unsafe-out"
+    with pytest.raises(ValueError, match="link or special"):
+        extract_tar(source, destination)
+    assert not (destination / "release" / "safe.png").exists()
 
 
 class _PayloadHandler(BaseHTTPRequestHandler):

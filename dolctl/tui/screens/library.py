@@ -5,12 +5,13 @@ from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.widgets import Button, Static
 
+from .imagepacks import ImagepacksTab
 from .mods import ModsTab
 from .sources import SourcesTab
 from .versions import VersionsTab
 
 
-_SECTIONS = ("versions", "mods", "sources")
+_SECTIONS = ("versions", "mods", "imagepacks", "sources")
 
 
 class LibraryScreen(Container):
@@ -51,7 +52,7 @@ class LibraryScreen(Container):
     def compose(self) -> ComposeResult:
         heading = Text("Library", style="bold yellow")
         heading.append(
-            "\nInstall game versions and mods before assigning them to an instance.",
+            "\nInstall versions, mods, and imagepacks before assigning them to an instance.",
             style="bright_black",
         )
         yield Static(heading, id="library-heading")
@@ -62,13 +63,24 @@ class LibraryScreen(Container):
                 classes="subnav-button -current",
             )
             yield Button("Mods", id="library-mods", classes="subnav-button")
-            yield Button("Sources", id="library-sources", classes="subnav-button")
+            yield Button(
+                "Imagepacks",
+                id="library-imagepacks",
+                classes="subnav-button",
+            )
+            yield Button(
+                "Mod sources", id="library-sources", classes="subnav-button"
+            )
         with Container(id="library-content"):
             yield VersionsTab(
                 id="versions-section",
                 classes="library-section -current",
             )
             yield ModsTab(id="mods-section", classes="library-section")
+            yield ImagepacksTab(
+                id="imagepacks-section",
+                classes="library-section",
+            )
             yield SourcesTab(id="sources-section", classes="library-section")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

@@ -120,6 +120,16 @@ def test_cli_adds_a_typed_builtin_mod_source(launcher: Launcher) -> None:
     assert dict(launcher.channels())["doli"].kind == "mod"
 
 
+def test_cli_lists_reviewed_imagepack_recipes(launcher: Launcher) -> None:
+    result = runner.invoke(
+        app,
+        ["--root", str(launcher.root), "imagepack", "list"],
+    )
+    assert result.exit_code == 0
+    assert "dolp-mysterious-ucb" in result.stdout
+    assert "DOLP on GitGud" in result.stdout
+
+
 def test_cli_rejects_ambiguous_install_options(
     launcher: Launcher, make_version_zip
 ) -> None:

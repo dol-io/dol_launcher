@@ -10,10 +10,10 @@ from ..modals import ConfirmModal, InputField, InputModal
 from .base import RefreshableTab
 
 
-class PresetItem(ListItem):
+class ModSourceItem(ListItem):
     def __init__(self, key: str, label: str) -> None:
         super().__init__(Static(label))
-        self.preset_key = key
+        self.source_key = key
 
 
 class SourcesTab(RefreshableTab):
@@ -36,17 +36,15 @@ class SourcesTab(RefreshableTab):
         with Horizontal(id="main"):
             with Vertical():
                 table: DataTable[str] = DataTable(id="sources", cursor_type="row")
-                table.add_columns(
-                    "name", "kind", "provider", "repository", "asset regex"
-                )
-                table.border_title = " Configured sources "
+                table.add_columns("name", "provider", "repository", "asset regex")
+                table.border_title = " Configured Mod sources "
                 yield table
             with Vertical():
-                presets = ListView(id="presets")
-                presets.border_title = " Built-in presets "
-                yield presets
+                catalog = ListView(id="mod-source-catalog")
+                catalog.border_title = " Mod sources "
+                yield catalog
         with Horizontal(id="actions"):
-            yield Button("Add preset", id="add-preset", classes="action-primary")
+            yield Button("Add source", id="add-source", classes="action-primary")
             yield Button("Add custom", id="add-custom", classes="action-accent")
             yield Button("Edit", id="edit")
             yield Button("Remove", id="remove", classes="action-danger")
@@ -55,21 +53,22 @@ class SourcesTab(RefreshableTab):
         table = self.query_one("#sources", DataTable)
         table.clear()
         for name, source in self.launcher.channels():
+            if source.kind != "mod":
+                continue
             table.add_row(
                 name,
-                source.kind,
                 source.provider,
                 source.repo,
                 source.asset_regex,
                 key=name,
             )
-        presets = self.query_one("#presets", ListView)
-        presets.clear()
-        for key, preset in self.launcher.channel_presets():
-            presets.append(
-                PresetItem(
+        catalog = self.query_one("#mod-source-catalog", ListView)
+        catalog.clear()
+        for key, preset in self.launcher.channel_presets(kind="mod"):
+            catalog.append(
+                ModSourceItem(
                     key,
-                    f"[{preset.kind}] {key}\n  {preset.description}",
+                    f"{key}\n  {preset.description}",
                 )
             )
 
@@ -80,13 +79,13 @@ class SourcesTab(RefreshableTab):
         key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         return str(key.value) if key is not None else None
 
-    def _selected_preset(self) -> str | None:
-        item = self.query_one("#presets", ListView).highlighted_child
-        return item.preset_key if isinstance(item, PresetItem) else None
+    def _selected_catalog_source(self) -> str | None:
+        item = self.query_one("#mod-source-catalog", ListView).highlighted_child
+        return item.source_key if isinstance(item, ModSourceItem) else None
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         handlers = {
-            "add-preset": self._add_preset,
+            "add-source": self._add_catalog_source,
             "add-custom": self._add_custom,
             "edit": self._edit,
             "remove": self._remove,
@@ -95,23 +94,23 @@ class SourcesTab(RefreshableTab):
         if handler is not None:
             handler()
 
-    def _add_preset(self) -> None:
-        preset = self._selected_preset()
-        if preset is None:
-            self.set_status("Select a preset first", "warning")
+    def _add_catalog_source(self) -> None:
+        source_key = self._selected_catalog_source()
+        if source_key is None:
+            self.set_status("Select a Mod source first", "warning")
             return
-        suggested = preset.removeprefix("dol-")
+        suggested = source_key.removeprefix("dol-")
         existing = {name for name, _source in self.launcher.channels()}
         if suggested not in existing:
-            self._create_source(suggested, preset=preset)
+            self._create_source(suggested, preset=source_key)
             return
         self.app.push_screen(
             InputModal(
-                f"Add preset {preset}",
+                f"Add Mod source {source_key}",
                 [InputField("name", "Source name", default=f"{suggested}-2")],
             ),
             lambda values: (
-                self._create_source(values["name"], preset=preset)
+                self._create_source(values["name"], preset=source_key)
                 if values is not None
                 else None
             ),
@@ -120,10 +119,9 @@ class SourcesTab(RefreshableTab):
     def _add_custom(self) -> None:
         self.app.push_screen(
             InputModal(
-                "Add GitHub source",
+                "Add custom Mod source",
                 [
                     InputField("name", "Source name", required=True),
-                    InputField("kind", "Kind (game or mod)", default="game"),
                     InputField("repo", "Repository (owner/name)", required=True),
                     InputField("regex", "Asset regex", default=r".*\.zip"),
                 ],
@@ -136,7 +134,7 @@ class SourcesTab(RefreshableTab):
             return
         self._create_source(
             values["name"],
-            kind=values["kind"],
+            kind="mod",
             repo=values["repo"],
             asset_regex=values["regex"],
         )
@@ -163,7 +161,6 @@ class SourcesTab(RefreshableTab):
             InputModal(
                 f"Edit source {name}",
                 [
-                    InputField("kind", "Kind (game or mod)", default=current.kind),
                     InputField("repo", "Repository", default=current.repo),
                     InputField("regex", "Asset regex", default=current.asset_regex),
                 ],
@@ -178,7 +175,6 @@ class SourcesTab(RefreshableTab):
             f"Updating source {name}…",
             lambda: self.launcher.update_channel(
                 name,
-                kind=values["kind"],
                 repo=values["repo"],
                 asset_regex=values["regex"],
             ),

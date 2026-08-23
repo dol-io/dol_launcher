@@ -9,9 +9,15 @@ from .build import build_runtime
 from .channel_presets import ChannelPreset, list_presets
 from .channels import add_channel, list_channels, remove_channel, update_channel
 from .doctor import run_doctor
+from .imagepacks import (
+    ImagepackRecipe,
+    install_imagepack as install_imagepack_recipe,
+    list_imagepacks,
+)
 from .models import (
     BuildResult,
     ChannelConfig,
+    ChannelKind,
     DoctorReport,
     InstalledVersion,
     Mod,
@@ -251,12 +257,33 @@ class Launcher:
     def remove_mod(self, mod_id: str) -> RemoveResult:
         return remove_mod(self.root, mod_id)
 
+    def imagepacks(self) -> list[ImagepackRecipe]:
+        return list_imagepacks()
+
+    def install_imagepack(
+        self,
+        recipe_id: str,
+        *,
+        mod_id: str | None = None,
+        force: bool = False,
+        progress: ProgressCallback | None = None,
+    ) -> str:
+        return install_imagepack_recipe(
+            self.root,
+            recipe_id,
+            mod_id,
+            force=force,
+            progress=progress,
+        )
+
     def channels(self) -> list[tuple[str, ChannelConfig]]:
         return list_channels(self.root)
 
     @staticmethod
-    def channel_presets() -> list[tuple[str, ChannelPreset]]:
-        return list_presets()
+    def channel_presets(
+        kind: ChannelKind | None = None,
+    ) -> list[tuple[str, ChannelPreset]]:
+        return list_presets(kind)
 
     def add_channel(self, name: str, **fields: object) -> ChannelConfig:
         return add_channel(self.root, name, **fields)  # type: ignore[arg-type]

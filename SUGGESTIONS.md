@@ -19,11 +19,13 @@ framework dependencies to the core launcher.
 
 ## 3. Additional release providers
 
-The provider boundary is intentionally small, but only GitHub Releases is
-implemented. Add another provider only when there is a concrete upstream in
-use; do not introduce a dynamic plugin registry pre-emptively. In particular,
-official vanilla builds currently use Blogspot/Pixeldrain rather than GitHub
-Releases, so they remain a local import until a stable index API is available.
+The configurable channel boundary intentionally supports only GitHub Releases.
+A small GitLab repository adapter exists for the reviewed DOLP imagepack recipe;
+it is not a generic user-configurable release channel. Add another channel
+provider only when there is a concrete upstream in use; do not introduce a
+dynamic plugin registry pre-emptively. In particular, official vanilla builds
+currently use Blogspot/Pixeldrain rather than GitHub Releases, so they remain a
+local import until a stable index API is available.
 
 ## 4. Build-storage optimisation
 

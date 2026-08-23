@@ -76,6 +76,17 @@ def _inspect_mod_archive(path: Path) -> tuple[dict, str | None]:
                     raise ValidationError(
                         f"Mod archive contains a symlink: {member.filename!r}"
                     )
+                file_type = stat.S_IFMT(member.external_attr >> 16)
+                if member.create_system == 3 and file_type not in {
+                    0,
+                    stat.S_IFREG,
+                    stat.S_IFDIR,
+                    stat.S_IFLNK,
+                }:
+                    raise ValidationError(
+                        "Mod archive contains a special file: "
+                        f"{member.filename!r}"
+                    )
                 if not member.is_dir():
                     files.append(member.filename.replace("\\", "/"))
 
@@ -186,7 +197,7 @@ def list_mods(root: Path) -> list[Mod]:
     return mods
 
 
-def _publish_mod_archive(
+def publish_mod_archive(
     layout: RootLayout,
     source: Path,
     mod_id: str | None = None,
@@ -262,7 +273,7 @@ def add_mod_from_zip(
             raise NotFoundError(f"Mod archive not found: {source}")
 
     try:
-        return _publish_mod_archive(
+        return publish_mod_archive(
             layout,
             source,
             mod_id,
@@ -296,7 +307,7 @@ def install_mod_from_remote(
     ensure_dir(archive.parent)
     try:
         provider.download(remote, archive, progress=progress)
-        return _publish_mod_archive(
+        return publish_mod_archive(
             layout,
             archive,
             mod_id,

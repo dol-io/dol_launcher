@@ -21,6 +21,7 @@ instance_app = typer.Typer(no_args_is_help=True)
 instance_mod_app = typer.Typer(no_args_is_help=True)
 version_app = typer.Typer(no_args_is_help=True)
 mod_app = typer.Typer(no_args_is_help=True)
+imagepack_app = typer.Typer(no_args_is_help=True)
 channel_app = typer.Typer(no_args_is_help=True)
 
 
@@ -485,6 +486,33 @@ def mod_remove(ctx: typer.Context, mod_id: str) -> None:
         typer.echo("Updated instances: " + ", ".join(result.affected_profiles))
 
 
+@imagepack_app.command("list")
+@with_errors
+def imagepack_list(ctx: typer.Context) -> None:
+    for recipe in _launcher(ctx).imagepacks():
+        typer.echo(
+            f"{recipe.id}\t{recipe.name}\t{recipe.source_label}\t"
+            f"{recipe.description}"
+        )
+
+
+@imagepack_app.command("install")
+@with_errors
+def imagepack_install(
+    ctx: typer.Context,
+    recipe_id: str,
+    mod_id: Optional[str] = typer.Option(None, "--id"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    installed = _launcher(ctx).install_imagepack(
+        recipe_id,
+        mod_id=mod_id,
+        force=force,
+        progress=_progress("download"),
+    )
+    typer.echo(f"Installed imagepack as mod: {installed}")
+
+
 @channel_app.command("list")
 @with_errors
 def channel_list(ctx: typer.Context) -> None:
@@ -595,4 +623,5 @@ app.add_typer(instance_app, name="instance")
 instance_app.add_typer(instance_mod_app, name="mod")
 app.add_typer(version_app, name="version")
 app.add_typer(mod_app, name="mod")
+app.add_typer(imagepack_app, name="imagepack")
 app.add_typer(channel_app, name="channel")

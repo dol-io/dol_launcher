@@ -35,13 +35,15 @@ TUI 现在围绕日常启动流程组织为三个工作区：
 
 1. `Play`：左侧选择实例，右侧查看版本、Mod 和启动设置；直接启动、停止或
    构建，也可以打开独立弹窗修改配置和 Mod 顺序；
-2. `Library`：集中管理 `Versions`、`Mods` 和 `Sources`；
+2. `Library`：集中管理 `Versions`、`Mods`、`Imagepacks` 和 `Mod sources`；
 3. `System`：查看 ROOT 和诊断结果。
 
 第一次使用时，先在 `Library → Versions` 导入游戏，再回到 `Play` 的
-`Configure` 为实例选择版本；需要 Mod 时先在 `Library → Sources` 添加内置
-Mod 来源，再到 `Library → Mods` 选择来源并安装，最后用 `Manage mods` 启用和
-排序。也可以继续从本地路径或 URL 导入。之后日常只需选中实例并按 `Launch`。
+`Configure` 为实例选择版本；需要 Mod 时先在 `Library → Mod sources` 从目录
+添加来源，再到 `Library → Mods` 选择来源并安装，最后用 `Manage mods` 启用和
+排序。DOLP 的原始图片包可在独立的 `Library → Imagepacks` 中现场构建；完成后
+同样会进入 Mods 库。也可以继续从本地路径或 URL 导入。之后日常只需选中实例并
+按 `Launch`。
 
 快捷键 `1`–`3` 切换工作区，`F5` 刷新，`q` 退出，`?` 查看完整帮助；在
 `Play` 中还可以使用 `n/a/e/m/b/l/x` 完成新建、设为活动、配置、管理 Mod、
@@ -81,29 +83,39 @@ uv run dolctl --root "$GAME_ROOT" instance configure default \
   --version <安装后显示的版本-id>
 ```
 
-内置来源经过资源类型区分，游戏包不会误走 Mod 安装器，`.mod.zip` 也不会被当作
-游戏版本。除默认来源外，其余来源是可选 preset：
+来源经过资源类型区分，游戏包不会误走 Mod 安装器，`.mod.zip` 也不会被当作游戏
+版本。CLI 提供以下静态来源模板；TUI 的 `Mod sources` 目录只展示其中真正可独立
+安装的 Mod 来源，不再使用容易混淆的 `Built-in presets` 名称。
+
+游戏来源模板：
 
 | preset | 类型 | 内容 |
 | --- | --- | --- |
 | `dol-modloader` | game | 带 SugarCube-2 ModLoader 的游戏包 |
 | `dol-modloader-zh` | game | 中文本地化 ModLoader 游戏包 |
-| `dol-image-pack` | mod | 原图包 |
-| `dol-i18n-zh` | mod | 中文 I18N Mod |
-| `doli` | mod | Degrees of Lewdity Intelligence |
-| `cheat-lyra` | mod | Lyra 作弊与成就解锁 |
-| `combat-status-display-lyra` | mod | Lyra 敌人 HP/AP 显示 |
-| `au-female-model-058` | mod | 适配 DoL 0.5.8.x 的 AU 女性模型 |
-| `ausdol-facial-expansion` | mod | AUsDoL 面部扩展 |
-| `ucb` | mod | 通用战斗美化上游版 |
+| `dol-lyra-besc-ucb` | game | [Lyra](https://github.com/DoL-Lyra/Lyra) 的 BESC+UCB 完整游戏整合包 |
 
-可以在 TUI 的 `Library → Sources` 选择 `Add preset`，或使用 CLI：
+Mod 来源目录：
+
+| source | 内容 |
+| --- | --- |
+| `dol-image-pack` | 原图包 |
+| `dol-i18n-zh` | 中文 I18N Mod |
+| `doli` | Degrees of Lewdity Intelligence |
+| `cheat-lyra` | Lyra 作弊与成就解锁 |
+| `combat-status-display-lyra` | Lyra 敌人 HP/AP 显示 |
+| `au-female-model-058` | 适配 DoL 0.5.8.x 的 AU 女性模型 |
+| `au-male-model-058` | 适配 DoL 0.5.8.x 的 AU 男性模型 |
+| `au-androgynous-model-058` | 适配 DoL 0.5.8.x 的 AU 中性模型 |
+| `ausdol-facial-expansion` | AUsDoL 面部扩展 |
+
+可以在 TUI 的 `Library → Mod sources` 选择 `Add source`，或使用 CLI：
 
 ```bash
-# 添加并安装一个可选游戏来源
-uv run dolctl --root "$GAME_ROOT" channel add zh \
-  --preset dol-modloader-zh
-uv run dolctl --root "$GAME_ROOT" version install latest --channel zh
+# 添加 Lyra 的 BESC+UCB 完整游戏来源
+uv run dolctl --root "$GAME_ROOT" channel add lyra-ucb \
+  --preset dol-lyra-besc-ucb
+uv run dolctl --root "$GAME_ROOT" version install latest --channel lyra-ucb
 
 # 添加并安装一个 Mod 来源
 uv run dolctl --root "$GAME_ROOT" channel add doli --preset doli
@@ -111,10 +123,29 @@ uv run dolctl --root "$GAME_ROOT" mod remote --channel doli
 uv run dolctl --root "$GAME_ROOT" mod install latest --channel doli
 ```
 
-`au-female-model-058` 特意只匹配 AU 0.8.x：该分支与你现有的 DoL 0.5.8.x
-实例兼容，不会误装同一个 Release 中面向新游戏版本的 0.9.x 包。`ucb` 指向原始
-通用战斗美化；`UCB-zedfix` 是二改包，目前没有独立、稳定的 GitHub Release，
-因此不能安全地伪装成可自动更新的来源。
+三个 `-058` AU 来源分别固定 female 0.8.x、male 0.3.x 和 androgynous 0.0.x；
+它们与 DoL 0.5.8.x 兼容，不会误装同一个 Release 中面向新游戏版本的资产。
+这些来源直接安装作者发布的 model zip，不会解包或二次分发 AU 图片。
+
+旧的 2024 `site098/mysterious` 资产已从目录移除。Lyra 会把 UCB imagepack 合并
+进完整游戏整合包，并未发布独立的 `.mod.zip`，所以
+`dol-lyra-besc-ucb` 只能用于 `version install`，不能用于 `mod install`。
+
+### 构建 DOLP Mysterious/UCB Imagepack
+
+`dolp-mysterious-ucb` 是独立的 Imagepack 配方，不伪装成 Release Mod 来源。启动器
+会查询 DOLP 中最后修改 `imagepacks/mysterious` 的提交，以该 commit 下载子目录，
+在本机生成带 ImageLoader 清单的 ModLoader zip，再发布到 Mods 库：
+
+```bash
+uv run dolctl --root "$GAME_ROOT" imagepack list
+uv run dolctl --root "$GAME_ROOT" imagepack install dolp-mysterious-ucb
+uv run dolctl --root "$GAME_ROOT" instance mod add dolp-mysterious-ucb
+```
+
+TUI 中对应 `Library → Imagepacks → Build & install`。安装记录保留 commit 链接；
+更新时再次构建并勾选 `replace`，或在 CLI 加 `--force`。生成包声明依赖
+`ModLoader DoL ImageLoaderHook ^2.3.0`，启用和排序方式与普通 Mod 相同。
 
 也可以添加自己的 GitHub Releases 来源：
 
@@ -158,6 +189,9 @@ dolctl mod install [latest|<id>] --channel <name> [--id <id>] [--force]
 dolctl mod info <id>
 dolctl mod remove <id>
 
+dolctl imagepack list
+dolctl imagepack install <recipe> [--id <mod-id>] [--force]
+
 dolctl channel list
 dolctl channel preset
 dolctl channel add <name> (--preset <preset> | --repo <owner/repo>)
@@ -189,7 +223,7 @@ ROOT 的解析顺序是 `--root`、`DOLCTL_ROOT`、从当前目录向父目录�
 ```
 
 版本、Mod、实例和运行目录都通过 staging + 原子替换发布。下载先写入 `.part`，
-zip 解压会拒绝路径穿越、符号链接和异常膨胀包。
+zip 和 imagepack tar 解压都会拒绝路径穿越、符号链接、特殊文件和异常膨胀包。
 
 完整格式和行为约束见 [`intro.md`](intro.md)。
 

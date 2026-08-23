@@ -43,6 +43,14 @@ PRESETS: dict[str, ChannelPreset] = {
         asset_regex=r"DoL-ModLoader-(?!.*-polyfill\.zip$).*\.zip",
         description="Chinese-localised DoL with ModLoader.",
     ),
+    "dol-lyra-besc-ucb": ChannelPreset(
+        kind="game",
+        provider="github",
+        repo="DoL-Lyra/Lyra",
+        # Lyra publishes complete game builds, not standalone ModLoader Mods.
+        asset_regex=r"DoL-.*-Lyra-.*-besc-ucb-.*\.zip",
+        description="Lyra complete game build with BESC and UCB (not a Mod).",
+    ),
     "dol-image-pack": ChannelPreset(
         kind="mod",
         provider="github",
@@ -86,19 +94,28 @@ PRESETS: dict[str, ChannelPreset] = {
         asset_regex=r"AUfemale\.model_v0\.8\.[0-9]+\.zip",
         description="AU female model for DoL 0.5.8.x.",
     ),
+    "au-male-model-058": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="AOKIUTAGE/UTAGEsDOL3.0",
+        # The 0.3.x line targets DoL 0.5.8.x.
+        asset_regex=r"AUmale\.model_v0\.3\.[0-9]+\.zip",
+        description="AU male model for DoL 0.5.8.x.",
+    ),
+    "au-androgynous-model-058": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="AOKIUTAGE/UTAGEsDOL3.0",
+        # The 0.0.x line targets DoL 0.5.8.x.
+        asset_regex=r"AUandrogynous\.model_v0\.0\.[0-9]+\.zip",
+        description="AU androgynous model for DoL 0.5.8.x.",
+    ),
     "ausdol-facial-expansion": ChannelPreset(
         kind="mod",
         provider="github",
         repo="AOKIUTAGE/UTAGEsDOL3.0",
         asset_regex=r"AUsDoL\.facial\.expansion\.mod\.zip",
         description="AUsDoL facial expansion Mod.",
-    ),
-    "ucb": ChannelPreset(
-        kind="mod",
-        provider="github",
-        repo="site098/mysterious",
-        asset_regex=r"default\.zip",
-        description="Upstream Universal Combat Beautification Mod.",
     ),
 }
 
@@ -109,5 +126,9 @@ def get_preset(key: str) -> ChannelPreset:
     return PRESETS[key]
 
 
-def list_presets() -> list[tuple[str, ChannelPreset]]:
-    return sorted(PRESETS.items())
+def list_presets(kind: ChannelKind | None = None) -> list[tuple[str, ChannelPreset]]:
+    return sorted(
+        (key, preset)
+        for key, preset in PRESETS.items()
+        if kind is None or preset.kind == kind
+    )
