@@ -227,6 +227,22 @@ def reorder_mods(root: Path, profile_name: str, ordered_mod_ids: list[str]) -> P
     return save_profile(root, profile)
 
 
+def set_profile_mods(
+    root: Path, profile_name: str, ordered_mod_ids: list[str]
+) -> Profile:
+    """Replace an instance's enabled mods with one validated ordered set."""
+    layout = RootLayout.open(root)
+    if len(ordered_mod_ids) != len(set(ordered_mod_ids)):
+        raise ValidationError("Mod order contains duplicates")
+    for mod_id in ordered_mod_ids:
+        validate_resource_name(mod_id, "mod")
+        if not (layout.mod_dir(mod_id) / ".mod.toml").is_file():
+            raise NotFoundError(f"Mod not found: {mod_id}")
+    profile = get_profile(layout.root, profile_name)
+    profile.mod_order = list(ordered_mod_ids)
+    return save_profile(layout.root, profile)
+
+
 def remove_mod_from_all_profiles(root: Path, mod_id: str) -> tuple[str, ...]:
     affected: list[str] = []
     for profile in list_profiles(root):

@@ -69,3 +69,18 @@ def test_reorder_must_be_exact_permutation(launcher: Launcher, make_mod_zip) -> 
     launcher.enable_mod("default", mod_id)
     with pytest.raises(ValidationError, match="exactly"):
         launcher.reorder_instance_mods("default", [])
+
+
+def test_set_instance_mods_replaces_selection_atomically(
+    launcher: Launcher, make_mod_zip
+) -> None:
+    alpha = launcher.install_mod(str(make_mod_zip("alpha.zip", mod_name="Alpha")))
+    beta = launcher.install_mod(str(make_mod_zip("beta.zip", mod_name="Beta")))
+    launcher.enable_mod("default", alpha)
+
+    updated = launcher.set_instance_mods("default", [beta])
+    assert updated.mod_order == [beta]
+
+    with pytest.raises(NotFoundError, match="missing"):
+        launcher.set_instance_mods("default", ["missing"])
+    assert launcher.instance("default").mod_order == [beta]

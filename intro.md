@@ -240,14 +240,28 @@ small compatibility aliases, but new documentation uses `instance` and
 
 ## 8. TUI experience
 
-The TUI is instance-centred:
+The TUI is instance-centred and has three workspaces instead of a flat set of
+resource tabs:
 
-1. **Instances** — instance list, selected version, ordered mods, launch
-   settings, Build/Launch/Stop.
-2. **Versions** — installed versions plus remote/local installation.
-3. **Mods** — local mod library and import/removal.
-4. **Sources** — channel presets and custom GitHub sources.
-5. **System** — ROOT information and doctor results.
+1. **Play** — select an instance, read its current configuration, then
+   Launch/Stop/Build. Creating an instance, changing launch settings, and
+   selecting or ordering mods happen in focused dialogs rather than inline in
+   the overview.
+2. **Library** — manage Versions, Mods, and Sources as three related sections.
+   Library operations are supporting tasks, not peers of the normal launch
+   flow.
+3. **System** — inspect ROOT information and the shared doctor report.
+
+Highlighting an instance only changes the local view. Mutations use explicit
+actions such as Make active or Save. Saving a mod selection replaces the
+enabled ordered set as one validated core operation. Launching an instance also
+makes it active.
+
+The interface must preserve the user's terminal colour scheme. Foreground,
+background, semantic states, inputs, table cursors, scrollbars, and modal
+screens use `ansi_default`; no RGB, fixed ANSI accent, or Textual semantic
+button colour is allowed. Focus and status are communicated with wording,
+symbols, bold/dim text, reverse video, and borders.
 
 Long operations run in worker threads. A shared operation wrapper handles busy
 state, error presentation, progress, and the post-write data-change signal.
@@ -289,5 +303,5 @@ End-to-end acceptance covers:
 6. launch/serve the entry over loopback;
 7. reject traversal/absolute ids without touching files outside ROOT;
 8. inject failures during replacement and retain the previous installation;
-9. mount and cycle through all TUI tabs;
+9. mount and navigate every TUI workspace and Library section;
 10. import `dolctl.cli` without importing `textual`.

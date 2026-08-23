@@ -33,6 +33,7 @@ from .profiles import (
     remove_mod_from_profile,
     reorder_mods,
     select_profile,
+    set_profile_mods,
 )
 from .root import RootLayout, init_root, load_state, resolve_root
 from .run import LaunchSession, prepare_run, prepare_serve
@@ -129,6 +130,9 @@ class Launcher:
 
     def reorder_instance_mods(self, instance: str, mod_ids: list[str]) -> Profile:
         return reorder_mods(self.root, instance, mod_ids)
+
+    def set_instance_mods(self, instance: str, mod_ids: list[str]) -> Profile:
+        return set_profile_mods(self.root, instance, mod_ids)
 
     def versions(self) -> list[InstalledVersion]:
         return list_installed(self.root)

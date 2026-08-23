@@ -31,16 +31,21 @@ uv run dolctl init ~/Games/DoL
 uv run dolctl --root ~/Games/DoL tui
 ```
 
-TUI 有五个页面：
+TUI 现在围绕日常启动流程组织为三个工作区：
 
-1. `Instances`：创建实例、选择版本、调整 Mod 顺序、构建和启动；
-2. `Versions`：安装本地或远程版本；
-3. `Mods`：管理本地 Mod 库；
-4. `Sources`：管理 GitHub 发布源；
-5. `System`：查看 ROOT 和诊断结果。
+1. `Play`：左侧选择实例，右侧查看版本、Mod 和启动设置；直接启动、停止或
+   构建，也可以打开独立弹窗修改配置和 Mod 顺序；
+2. `Library`：集中管理 `Versions`、`Mods` 和 `Sources`；
+3. `System`：查看 ROOT 和诊断结果。
 
-快捷键 `1`–`5` 切换页面，`F5` 刷新，`q` 退出。在实例页用空格切换
-Mod，`+`/`-` 调整加载顺序。
+第一次使用时，先在 `Library → Versions` 导入游戏，再回到 `Play` 的
+`Configure` 为实例选择版本；需要 Mod 时先在 `Library → Mods` 导入，然后用
+`Manage mods` 启用和排序。之后日常只需选中实例并按 `Launch`。
+
+快捷键 `1`–`3` 切换工作区，`F5` 刷新，`q` 退出，`?` 查看完整帮助；在
+`Play` 中还可以使用 `n/a/e/m/b/l/x` 完成新建、设为活动、配置、管理 Mod、
+构建、启动和停止。TUI 只使用终端默认前景色与背景色，焦点和状态通过反显、
+粗体、边框及文字表达，不会覆盖用户自己的 terminal color scheme。
 
 ## CLI 工作流
 

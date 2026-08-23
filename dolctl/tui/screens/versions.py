@@ -44,11 +44,11 @@ class VersionsTab(RefreshableTab):
                 remote.add_columns("id", "published", "asset")
                 yield remote
         with Horizontal(id="actions"):
-            yield Button("Install latest", id="latest", variant="primary")
+            yield Button("Install latest", id="latest")
             yield Button("Install selected", id="install-remote")
             yield Button("Import zip", id="import-zip")
             yield Button("Import directory", id="import-dir")
-            yield Button("Remove", id="remove", variant="error")
+            yield Button("Remove", id="remove")
 
     def refresh_from_disk(self) -> None:
         snapshot = self.launcher.snapshot()

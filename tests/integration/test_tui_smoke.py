@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+from pathlib import Path
+import re
+
 import pytest
-from textual.widgets import DataTable, ListView, TabbedContent
+from textual.widgets import Button, DataTable, Input, OptionList, Static
 
 from core.launcher import Launcher
 from dolctl.tui.app import DolctlApp
+from dolctl.tui.modals import ModManagerModal
 from dolctl.tui.screens.instances import InstancesTab
+from dolctl.tui.screens.library import LibraryScreen
 from dolctl.tui.screens.mods import ModsTab
 from dolctl.tui.screens.sources import SourcesTab
 from dolctl.tui.screens.system import SystemTab
 from dolctl.tui.screens.versions import VersionsTab
+from dolctl.tui.theme import TERMINAL_CSS, TERMINAL_THEME
 
 
 @pytest.mark.asyncio
-async def test_app_mounts_and_cycles_all_five_tabs(
+async def test_app_mounts_and_navigates_the_three_workspaces(
     launcher: Launcher, make_version_dir, make_mod_zip
 ) -> None:
     launcher.install_version_directory(make_version_dir(), version_id="game")
@@ -24,31 +30,119 @@ async def test_app_mounts_and_cycles_all_five_tabs(
     app = DolctlApp(launcher)
     async with app.run_test(size=(150, 50)) as pilot:
         await pilot.pause()
-        tabs = app.query_one("#tabs", TabbedContent)
-        for tab in ("instances", "versions", "mods", "sources", "system"):
-            app.action_switch_tab(tab)
-            await pilot.pause()
-            assert tabs.active == tab
-
+        assert app.current_theme.name == "dolctl-terminal"
+        assert app.query_one("#play-page").has_class("-current")
         assert (
-            len(
-                app.query_one(InstancesTab)
-                .query_one("#instance-list", ListView)
-                .children
-            )
+            app.query_one(InstancesTab)
+            .query_one("#instance-list", OptionList)
+            .option_count
             == 1
         )
+        assert (
+            app.query_one(InstancesTab).query_one("#enabled-mods", DataTable).row_count
+            == 1
+        )
+
+        await pilot.press("2")
+        assert app.query_one("#library-page").has_class("-current")
+        library = app.query_one(LibraryScreen)
+        for section in ("versions", "mods", "sources"):
+            library.show_section(section)
+            await pilot.pause()
+            assert app.query_one(f"#{section}-section").has_class("-current")
+            assert app.query_one(f"#library-{section}", Button).has_class("-current")
+
         assert (
             app.query_one(VersionsTab).query_one("#installed", DataTable).row_count == 1
         )
         assert app.query_one(ModsTab).query_one("#mods", DataTable).row_count == 1
         assert app.query_one(SourcesTab).query_one("#sources", DataTable).row_count == 1
 
+        await pilot.click("#nav-system")
+        assert app.query_one("#system-page").has_class("-current")
+
+
+@pytest.mark.asyncio
+async def test_highlight_selects_instance_without_mutating_active_state(
+    launcher: Launcher, make_version_dir
+) -> None:
+    launcher.install_version_directory(make_version_dir(), version_id="game")
+    launcher.create_instance("second", version_id="game")
+
+    app = DolctlApp(launcher)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        assert launcher.active_instance() == "default"
+
+        await pilot.press("down")
+        summary = app.query_one("#instance-summary", Static)
+        assert "second" in str(summary.render())
+        assert launcher.active_instance() == "default"
+        assert not app.query_one("#make-active", Button).disabled
+
+
+@pytest.mark.asyncio
+async def test_play_stays_usable_in_an_80_column_terminal(
+    launcher: Launcher,
+) -> None:
+    app = DolctlApp(launcher)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        detail = app.query_one("#instance-detail")
+        launch = app.query_one("#launch-instance", Button)
+        status = app.query_one("#status")
+
+        assert detail.allow_vertical_scroll
+        assert launch.region.bottom <= status.region.y
+
+
+@pytest.mark.asyncio
+async def test_workspace_shortcuts_do_not_capture_input_text(
+    launcher: Launcher,
+) -> None:
+    app = DolctlApp(launcher)
+    async with app.run_test(size=(100, 35)) as pilot:
+        app.open_library("mods")
+        source = app.query_one("#source", Input)
+        source.focus()
+
+        await pilot.press("2", "q")
+        await pilot.pause()
+
+        assert source.value == "2q"
+        assert app.query_one("#library-page").has_class("-current")
+
+
+@pytest.mark.asyncio
+async def test_mod_manager_saves_toggle_and_order_as_one_change(
+    launcher: Launcher, make_mod_zip
+) -> None:
+    alpha = launcher.install_mod(str(make_mod_zip("alpha.zip", mod_name="Alpha")))
+    beta = launcher.install_mod(str(make_mod_zip("beta.zip", mod_name="Beta")))
+    launcher.enable_mod("default", alpha)
+
+    app = DolctlApp(launcher)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause()
+        result: list[list[str] | None] = []
+        app.push_screen(
+            ModManagerModal(launcher.instance("default"), launcher.mods()),
+            result.append,
+        )
+        await pilot.pause()
+        assert isinstance(app.screen, ModManagerModal)
+
+        await pilot.press("down", "space", "plus")
+        await pilot.click("#mod-manager-save")
+        await pilot.pause()
+        assert result == [[beta, alpha]]
+        assert launcher.instance("default").mod_order == [alpha]
+
 
 @pytest.mark.asyncio
 async def test_repeated_data_notifications_are_safe(launcher: Launcher) -> None:
     app = DolctlApp(launcher)
-    async with app.run_test(size=(150, 50)) as pilot:
+    async with app.run_test(size=(120, 40)) as pilot:
         await pilot.pause()
         for _ in range(3):
             app.notify_data_changed()
@@ -56,13 +150,38 @@ async def test_repeated_data_notifications_are_safe(launcher: Launcher) -> None:
 
 
 @pytest.mark.asyncio
-async def test_system_tab_renders_diagnostics_for_corrupt_config(
+async def test_system_page_renders_diagnostics_for_corrupt_config(
     launcher: Launcher,
 ) -> None:
     (launcher.root / ".dolctl" / "config.toml").write_text("[", encoding="utf-8")
     app = DolctlApp(launcher)
-    async with app.run_test(size=(150, 50)) as pilot:
-        app.action_switch_tab("system")
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.action_switch_page("system")
         await pilot.pause()
         rendered = str(app.query_one(SystemTab).query_one("#checks").render())
         assert "Cannot read config" in rendered
+
+
+def test_tui_uses_only_terminal_default_colours() -> None:
+    tui_root = Path(__file__).parents[2] / "dolctl" / "tui"
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in tui_root.rglob("*.py")
+    )
+
+    assert not re.search(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b", source)
+    assert not re.search(r"\b(?:rgb|rgba|hsl|hsla)\(", source)
+    assert not re.search(r"ansi_(?!default\b)[a-z_]+", source)
+    assert not re.search(r"\[(?:red|green|yellow|blue|cyan|magenta)(?:\]|\s)", source)
+    assert "variant=" not in source
+    assert "text-style: reverse" in TERMINAL_CSS
+
+    variables = {
+        **TERMINAL_THEME.to_color_system().generate(),
+        **TERMINAL_THEME.variables,
+    }
+    ansi_colours = {
+        colour
+        for value in variables.values()
+        for colour in re.findall(r"ansi_[a-z_]+", value)
+    }
+    assert ansi_colours == {"ansi_default"}

@@ -30,13 +30,13 @@ class ModsTab(RefreshableTab):
             )
             yield Input(placeholder="id override", id="mod-id")
             yield Checkbox("replace", id="force")
-            yield Button("Import", id="import-button", variant="primary")
+            yield Button("Import", id="import-button")
         table: DataTable[str] = DataTable(id="mods", cursor_type="row")
         table.add_columns("id", "name", "version", "author", "source")
         yield table
         with Horizontal(id="actions"):
             yield Button("Info", id="info")
-            yield Button("Remove", id="remove", variant="error")
+            yield Button("Remove", id="remove")
 
     def refresh_from_disk(self) -> None:
         table = self.query_one("#mods", DataTable)

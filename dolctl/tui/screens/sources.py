@@ -37,10 +37,10 @@ class SourcesTab(RefreshableTab):
                 yield Static("[b]Built-in presets[/b]")
                 yield ListView(id="presets")
         with Horizontal(id="actions"):
-            yield Button("Add preset", id="add-preset", variant="primary")
+            yield Button("Add preset", id="add-preset")
             yield Button("Add custom", id="add-custom")
             yield Button("Edit", id="edit")
-            yield Button("Remove", id="remove", variant="error")
+            yield Button("Remove", id="remove")
 
     def refresh_from_disk(self) -> None:
         table = self.query_one("#sources", DataTable)

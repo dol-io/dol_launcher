@@ -16,9 +16,9 @@ class SystemTab(RefreshableTab):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="summary")
-        yield Static("", id="checks")
+        yield Static("", id="checks", markup=False)
         with Horizontal(id="actions"):
-            yield Button("Run diagnostics", id="refresh", variant="primary")
+            yield Button("Run diagnostics", id="refresh")
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -29,8 +29,7 @@ class SystemTab(RefreshableTab):
         self._last_doctor_ok = report.ok
         self.query_one("#checks", Static).update(
             "\n".join(
-                f"[{'green' if check.ok else 'red'}]"
-                f"{'✓' if check.ok else '✗'}[/] {check.message}"
+                f"{'OK' if check.ok else 'FAIL'}  {check.message}"
                 for check in report.checks
             )
         )
