@@ -257,11 +257,12 @@ actions such as Make active or Save. Saving a mod selection replaces the
 enabled ordered set as one validated core operation. Launching an instance also
 makes it active.
 
-The interface must preserve the user's terminal colour scheme. Foreground,
-background, semantic states, inputs, table cursors, scrollbars, and modal
-screens use `ansi_default`; no RGB, fixed ANSI accent, or Textual semantic
-button colour is allowed. Focus and status are communicated with wording,
-symbols, bold/dim text, reverse video, and borders.
+The interface must preserve the user's terminal colour scheme. Backgrounds use
+`ansi_default`, while structure and semantic states use only the named ANSI 16
+palette so the terminal remains responsible for the actual colour values. No
+RGB, hex, or 256-colour index is allowed. The visual language follows rmpc:
+blue rounded pane borders, compact single-line actions, filled active items,
+yellow metadata, and green/yellow/red success, warning, and error states.
 
 Long operations run in worker threads. A shared operation wrapper handles busy
 state, error presentation, progress, and the post-write data-change signal.

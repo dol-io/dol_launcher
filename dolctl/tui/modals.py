@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -16,7 +17,7 @@ class ConfirmModal(ModalScreen[bool]):
     DEFAULT_CSS = """
     ConfirmModal { align: center middle; }
     ConfirmModal > Vertical {
-        width: 64; height: auto; border: thick; padding: 1 2;
+        width: 64; height: auto; border: round ansi_blue; padding: 1 2;
     }
     ConfirmModal Horizontal { height: auto; align: center middle; padding-top: 1; }
     ConfirmModal Button { margin: 0 1; }
@@ -29,10 +30,20 @@ class ConfirmModal(ModalScreen[bool]):
         self.confirm_label = confirm_label
 
     def compose(self) -> ComposeResult:
-        with Vertical():
+        with Vertical() as card:
+            card.border_title = Text(" Confirm ")
             yield Static(self.prompt)
             with Horizontal():
-                yield Button(self.confirm_label, id="confirm")
+                confirm_class = (
+                    "action-danger"
+                    if self.confirm_label in {"Delete", "Remove"}
+                    else "action-primary"
+                )
+                yield Button(
+                    self.confirm_label,
+                    id="confirm",
+                    classes=confirm_class,
+                )
                 yield Button("Cancel", id="cancel")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -52,7 +63,7 @@ class InputModal(ModalScreen[dict[str, str] | None]):
     DEFAULT_CSS = """
     InputModal { align: center middle; }
     InputModal > Vertical {
-        width: 72; height: auto; border: thick; padding: 1 2;
+        width: 72; height: auto; border: round ansi_blue; padding: 1 2;
     }
     InputModal Label { padding-top: 1; }
     InputModal Horizontal { height: auto; align: center middle; padding-top: 1; }
@@ -73,8 +84,8 @@ class InputModal(ModalScreen[dict[str, str] | None]):
         self.validator = validator
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static(f"[b]{self.modal_title}[/b]")
+        with Vertical() as card:
+            card.border_title = Text(f" {self.modal_title} ")
             for field in self.fields:
                 yield Label(field.label)
                 yield Input(
@@ -82,9 +93,9 @@ class InputModal(ModalScreen[dict[str, str] | None]):
                     placeholder=field.placeholder,
                     id=f"field-{field.key}",
                 )
-            yield Static("", id="error", markup=False)
+            yield Static("", id="error", classes="form-error", markup=False)
             with Horizontal():
-                yield Button("OK", id="confirm")
+                yield Button("OK", id="confirm", classes="action-primary")
                 yield Button("Cancel", id="cancel")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -118,7 +129,8 @@ class InfoModal(ModalScreen[None]):
     DEFAULT_CSS = """
     InfoModal { align: center middle; }
     InfoModal > Vertical {
-        width: 72; height: auto; max-height: 85%; border: thick; padding: 1 2;
+        width: 72; height: auto; max-height: 85%;
+        border: round ansi_blue; padding: 1 2;
     }
     InfoModal Horizontal { height: auto; align: center middle; padding-top: 1; }
     """
@@ -130,11 +142,11 @@ class InfoModal(ModalScreen[None]):
         self.body = body
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static(f"[b]{self.modal_title}[/b]")
+        with Vertical() as card:
+            card.border_title = Text(f" {self.modal_title} ")
             yield Static(self.body, markup=False)
             with Horizontal():
-                yield Button("Close", id="close")
+                yield Button("Close", id="close", classes="action-accent")
 
     def on_button_pressed(self, _event: Button.Pressed) -> None:
         self.dismiss(None)
@@ -150,7 +162,7 @@ class CreateInstanceModal(ModalScreen[CreateInstanceValues | None]):
     DEFAULT_CSS = """
     CreateInstanceModal { align: center middle; }
     CreateInstanceModal > Vertical {
-        width: 68; height: auto; border: thick ansi_default; padding: 1 2;
+        width: 68; height: auto; border: round ansi_blue; padding: 1 2;
     }
     CreateInstanceModal Label { padding-top: 1; }
     CreateInstanceModal Horizontal {
@@ -165,8 +177,8 @@ class CreateInstanceModal(ModalScreen[CreateInstanceValues | None]):
         self.version_ids = tuple(version_ids)
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static("[b]Create instance[/b]")
+        with Vertical() as card:
+            card.border_title = Text(" Create instance ")
             yield Label("Name")
             yield Input(placeholder="instance name", id="instance-name")
             yield Label("Game version")
@@ -175,9 +187,18 @@ class CreateInstanceModal(ModalScreen[CreateInstanceValues | None]):
                 prompt="No version yet",
                 id="instance-version",
             )
-            yield Static("", id="instance-error", markup=False)
+            yield Static(
+                "",
+                id="instance-error",
+                classes="form-error",
+                markup=False,
+            )
             with Horizontal():
-                yield Button("Create", id="instance-create")
+                yield Button(
+                    "Create",
+                    id="instance-create",
+                    classes="action-primary",
+                )
                 yield Button("Cancel", id="instance-cancel")
 
     def on_mount(self) -> None:
@@ -213,7 +234,7 @@ class InstanceSettingsModal(ModalScreen[InstanceSettings | None]):
     DEFAULT_CSS = """
     InstanceSettingsModal { align: center middle; }
     InstanceSettingsModal > Vertical {
-        width: 68; height: auto; border: thick ansi_default; padding: 1 2;
+        width: 68; height: auto; border: round ansi_blue; padding: 1 2;
     }
     InstanceSettingsModal Label { padding-top: 1; }
     InstanceSettingsModal Horizontal {
@@ -240,8 +261,8 @@ class InstanceSettingsModal(ModalScreen[InstanceSettings | None]):
         version_value = (
             self.profile.version_id if self.profile.version_id else Select.NULL
         )
-        with Vertical():
-            yield Static(f"[b]Configure {self.profile.name}[/b]")
+        with Vertical() as card:
+            card.border_title = Text(f" Configure {self.profile.name} ")
             yield Label("Game version")
             yield Select(
                 [(version_id, version_id) for version_id in self.version_ids],
@@ -266,9 +287,14 @@ class InstanceSettingsModal(ModalScreen[InstanceSettings | None]):
                 allow_blank=False,
                 id="settings-browser",
             )
-            yield Static("", id="settings-error", markup=False)
+            yield Static(
+                "",
+                id="settings-error",
+                classes="form-error",
+                markup=False,
+            )
             with Horizontal():
-                yield Button("Save", id="settings-save")
+                yield Button("Save", id="settings-save", classes="action-primary")
                 yield Button("Cancel", id="settings-cancel")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -302,12 +328,15 @@ class ModManagerModal(ModalScreen[list[str] | None]):
     DEFAULT_CSS = """
     ModManagerModal { align: center middle; }
     ModManagerModal > Vertical {
-        width: 90%; height: 85%; border: thick ansi_default; padding: 1 2;
+        width: 90%; height: 85%; border: round ansi_blue; padding: 1 2;
     }
-    ModManagerModal DataTable { height: 1fr; }
+    ModManagerModal DataTable {
+        height: 1fr;
+        border: round ansi_blue;
+    }
     ModManagerModal Horizontal { height: auto; padding-top: 1; }
     ModManagerModal Button { margin-right: 1; }
-    ModManagerModal #mod-manager-hint { height: auto; text-style: dim; }
+    ModManagerModal #mod-manager-hint { height: auto; }
     ModManagerModal #mod-manager-error { height: auto; }
     """
     BINDINGS = [
@@ -326,22 +355,36 @@ class ModManagerModal(ModalScreen[list[str] | None]):
         self._all_ids.extend(mod.id for mod in mods if mod.id not in self._all_ids)
 
     def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Static(f"[b]Mods for {self.profile.name}[/b]")
+        with Vertical() as card:
+            card.border_title = Text(f" Mods for {self.profile.name} ")
             yield Static(
                 "Space toggles a mod. + / - changes the load order.",
                 id="mod-manager-hint",
+                classes="hint",
                 markup=False,
             )
             table: DataTable[str] = DataTable(id="mod-manager-table", cursor_type="row")
             table.add_columns("on", "order", "id", "name", "version")
             yield table
-            yield Static("", id="mod-manager-error", markup=False)
+            yield Static(
+                "",
+                id="mod-manager-error",
+                classes="form-error",
+                markup=False,
+            )
             with Horizontal():
-                yield Button("Toggle", id="mod-manager-toggle")
+                yield Button(
+                    "Toggle",
+                    id="mod-manager-toggle",
+                    classes="action-accent",
+                )
                 yield Button("Move up", id="mod-manager-up")
                 yield Button("Move down", id="mod-manager-down")
-                yield Button("Save", id="mod-manager-save")
+                yield Button(
+                    "Save",
+                    id="mod-manager-save",
+                    classes="action-primary",
+                )
                 yield Button("Cancel", id="mod-manager-cancel")
 
     def on_mount(self) -> None:

@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 
 import pytest
+from rich.color import ColorType
 from textual.widgets import Button, DataTable, Input, OptionList, Static
 
 from core.launcher import Launcher
@@ -15,7 +16,7 @@ from dolctl.tui.screens.mods import ModsTab
 from dolctl.tui.screens.sources import SourcesTab
 from dolctl.tui.screens.system import SystemTab
 from dolctl.tui.screens.versions import VersionsTab
-from dolctl.tui.theme import TERMINAL_CSS, TERMINAL_THEME
+from dolctl.tui.theme import ANSI_16_COLOURS, TERMINAL_CSS, TERMINAL_THEME
 
 
 @pytest.mark.asyncio
@@ -30,7 +31,7 @@ async def test_app_mounts_and_navigates_the_three_workspaces(
     app = DolctlApp(launcher)
     async with app.run_test(size=(150, 50)) as pilot:
         await pilot.pause()
-        assert app.current_theme.name == "dolctl-terminal"
+        assert app.current_theme.name == "dolctl-ansi16"
         assert app.query_one("#play-page").has_class("-current")
         assert (
             app.query_one(InstancesTab)
@@ -94,6 +95,37 @@ async def test_play_stays_usable_in_an_80_column_terminal(
 
         assert detail.allow_vertical_scroll
         assert launch.region.bottom <= status.region.y
+
+
+@pytest.mark.asyncio
+async def test_tui_keeps_native_ansi_slots_at_runtime(
+    launcher: Launcher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    app = DolctlApp(launcher)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+
+        assert app.native_ansi_color
+        topbar = app.query_one("#topbar")
+        assert topbar.styles.background.ansi == -1
+        assert topbar.styles.border_top[1].ansi == 4
+
+        current_page = app.query_one("#nav-play", Button).rich_style
+        assert current_page.color is not None
+        assert current_page.bgcolor is not None
+        assert current_page.color.type is ColorType.STANDARD
+        assert current_page.color.number == 0
+        assert current_page.bgcolor.type is ColorType.STANDARD
+        assert current_page.bgcolor.number == 4
+
+        launch = app.query_one("#launch-instance", Button).rich_style
+        assert launch.color is not None
+        assert launch.bgcolor is not None
+        assert launch.color.type is ColorType.STANDARD
+        assert launch.color.number == 0
+        assert launch.bgcolor.type is ColorType.STANDARD
+        assert launch.bgcolor.number == 2
 
 
 @pytest.mark.asyncio
@@ -162,7 +194,7 @@ async def test_system_page_renders_diagnostics_for_corrupt_config(
         assert "Cannot read config" in rendered
 
 
-def test_tui_uses_only_terminal_default_colours() -> None:
+def test_tui_uses_only_ansi_16_terminal_colours() -> None:
     tui_root = Path(__file__).parents[2] / "dolctl" / "tui"
     source = "\n".join(
         path.read_text(encoding="utf-8") for path in tui_root.rglob("*.py")
@@ -170,18 +202,26 @@ def test_tui_uses_only_terminal_default_colours() -> None:
 
     assert not re.search(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b", source)
     assert not re.search(r"\b(?:rgb|rgba|hsl|hsla)\(", source)
-    assert not re.search(r"ansi_(?!default\b)[a-z_]+", source)
-    assert not re.search(r"\[(?:red|green|yellow|blue|cyan|magenta)(?:\]|\s)", source)
     assert "variant=" not in source
-    assert "text-style: reverse" in TERMINAL_CSS
+    allowed_colours = ANSI_16_COLOURS | {"ansi_default"}
+    source_colours = set(re.findall(r"ansi_[a-z_]+", source))
+    assert source_colours <= allowed_colours
+    assert {
+        "ansi_blue",
+        "ansi_cyan",
+        "ansi_green",
+        "ansi_yellow",
+        "ansi_red",
+    } <= source_colours
+    assert "background: ansi_default" in TERMINAL_CSS
 
     variables = {
         **TERMINAL_THEME.to_color_system().generate(),
         **TERMINAL_THEME.variables,
     }
-    ansi_colours = {
+    theme_colours = {
         colour
         for value in variables.values()
         for colour in re.findall(r"ansi_[a-z_]+", value)
     }
-    assert ansi_colours == {"ansi_default"}
+    assert theme_colours <= allowed_colours

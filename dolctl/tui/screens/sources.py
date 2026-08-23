@@ -21,7 +21,13 @@ class SourcesTab(RefreshableTab):
     SourcesTab #main { height: 1fr; }
     SourcesTab #main > Vertical { padding-right: 1; }
     SourcesTab DataTable,
-    SourcesTab ListView { height: 1fr; }
+    SourcesTab ListView {
+        height: 1fr;
+        border: round ansi_blue;
+        border-title-color: ansi_yellow;
+        border-title-background: ansi_default;
+        border-title-style: bold;
+    }
     SourcesTab #actions { height: auto; padding-top: 1; }
     SourcesTab Button { margin-right: 1; }
     """
@@ -29,18 +35,19 @@ class SourcesTab(RefreshableTab):
     def compose(self) -> ComposeResult:
         with Horizontal(id="main"):
             with Vertical():
-                yield Static("[b]Configured sources[/b]")
                 table: DataTable[str] = DataTable(id="sources", cursor_type="row")
                 table.add_columns("name", "provider", "repository", "asset regex")
+                table.border_title = " Configured sources "
                 yield table
             with Vertical():
-                yield Static("[b]Built-in presets[/b]")
-                yield ListView(id="presets")
+                presets = ListView(id="presets")
+                presets.border_title = " Built-in presets "
+                yield presets
         with Horizontal(id="actions"):
-            yield Button("Add preset", id="add-preset")
-            yield Button("Add custom", id="add-custom")
+            yield Button("Add preset", id="add-preset", classes="action-primary")
+            yield Button("Add custom", id="add-custom", classes="action-accent")
             yield Button("Edit", id="edit")
-            yield Button("Remove", id="remove")
+            yield Button("Remove", id="remove", classes="action-danger")
 
     def refresh_from_disk(self) -> None:
         table = self.query_one("#sources", DataTable)

@@ -20,17 +20,22 @@ _PAGES = ("play", "library", "system")
 
 
 class StatusBar(Label):
-    DEFAULT_CSS = "StatusBar { height: 1; padding: 0 1; }"
+    DEFAULT_CSS = "StatusBar { width: 1fr; height: 1; }"
 
     _PREFIXES = {
-        "success": "OK",
+        "info": "•",
+        "success": "✓",
         "warning": "!",
-        "error": "ERROR",
+        "error": "×",
     }
+    _LEVEL_CLASSES = tuple(f"status-{level}" for level in _PREFIXES)
 
     def show_message(self, message: str, level: str = "info") -> None:
-        prefix = self._PREFIXES.get(level)
-        self.update(f"{prefix}: {message}" if prefix else message)
+        selected_level = level if level in self._PREFIXES else "info"
+        for level_class in self._LEVEL_CLASSES:
+            self.remove_class(level_class)
+        self.add_class(f"status-{selected_level}")
+        self.update(f"{self._PREFIXES[selected_level]} {message}")
 
 
 class DolctlApp(App[None]):
@@ -38,12 +43,14 @@ class DolctlApp(App[None]):
         TERMINAL_CSS
         + """
     #topbar {
-        height: 1;
+        height: 3;
         padding: 0 1;
+        border: round ansi_blue;
     }
 
     #brand {
         width: auto;
+        color: ansi_yellow;
         text-style: bold;
     }
 
@@ -55,8 +62,8 @@ class DolctlApp(App[None]):
 
     #navigation {
         height: 3;
-        padding-left: 1;
-        border-bottom: solid ansi_default;
+        padding: 0 1;
+        border: round ansi_blue;
     }
 
     #navigation Button {
@@ -75,15 +82,32 @@ class DolctlApp(App[None]):
         display: block;
     }
 
-    #status {
-        border-top: solid ansi_default;
+    #footerbar {
+        height: 3;
+        padding: 0 1;
+        border: round ansi_blue;
+    }
+
+    StatusBar.status-info {
+        color: ansi_blue;
+    }
+
+    StatusBar.status-success {
+        color: ansi_green;
+    }
+
+    StatusBar.status-warning {
+        color: ansi_yellow;
+    }
+
+    StatusBar.status-error {
+        color: ansi_red;
     }
 
     #keybar {
         height: 1;
-        padding: 0 1;
+        width: auto;
         text-align: right;
-        text-style: dim;
     }
     """
     )
@@ -110,19 +134,29 @@ class DolctlApp(App[None]):
             yield Static(f"dolctl {__version__}", id="brand", markup=False)
             yield Static(str(self.launcher.root), id="root-context", markup=False)
         with Horizontal(id="navigation"):
-            yield Button("1  Play", id="nav-play", classes="-current")
-            yield Button("2  Library", id="nav-library")
-            yield Button("3  System", id="nav-system")
+            yield Button(
+                "1  Play",
+                id="nav-play",
+                classes="nav-button -current",
+            )
+            yield Button("2  Library", id="nav-library", classes="nav-button")
+            yield Button("3  System", id="nav-system", classes="nav-button")
         with Container(id="workspace"):
             yield InstancesTab(id="play-page", classes="workspace-page -current")
             yield LibraryScreen(id="library-page", classes="workspace-page")
             yield SystemTab(id="system-page", classes="workspace-page")
-        yield StatusBar("Ready", id="status", markup=False)
-        yield Static(
-            "F5 refresh   ? help   q quit",
-            id="keybar",
-            markup=False,
-        )
+        with Horizontal(id="footerbar"):
+            yield StatusBar(
+                "• Ready",
+                id="status",
+                classes="status-info",
+                markup=False,
+            )
+            yield Static(
+                "F5 refresh   ? help   q quit",
+                id="keybar",
+                markup=False,
+            )
 
     def on_mount(self) -> None:
         self.title = "dolctl"

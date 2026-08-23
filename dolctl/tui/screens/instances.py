@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -37,13 +38,15 @@ class InstancesTab(RefreshableTab):
     InstancesTab #instance-sidebar {
         width: 30;
         padding-right: 1;
-        border-right: solid ansi_default;
     }
 
     InstancesTab #instance-list {
         height: 1fr;
-        border: none;
-        padding: 0;
+        border: round ansi_blue;
+        border-title-color: ansi_yellow;
+        border-title-background: ansi_default;
+        border-title-style: bold;
+        padding: 0 1;
     }
 
     InstancesTab #instance-list-actions,
@@ -71,23 +74,29 @@ class InstancesTab(RefreshableTab):
     InstancesTab #instance-facts {
         margin-top: 1;
         padding: 0 1;
-        border: solid ansi_default;
-    }
-
-    InstancesTab .section-title {
-        height: auto;
-        padding-top: 1;
-        text-style: bold;
+        border: round ansi_blue;
+        border-title-color: ansi_yellow;
+        border-title-background: ansi_default;
+        border-title-style: bold;
     }
 
     InstancesTab #enabled-mods {
         height: 1fr;
-        min-height: 5;
+        min-height: 6;
+        margin-top: 1;
+        border: round ansi_blue;
+        border-title-color: ansi_yellow;
+        border-title-background: ansi_default;
+        border-title-style: bold;
     }
 
     InstancesTab #activity-log {
         height: 6;
-        border: solid ansi_default;
+        margin-top: 1;
+        border: round ansi_blue;
+        border-title-color: ansi_yellow;
+        border-title-background: ansi_default;
+        border-title-style: bold;
     }
     """
 
@@ -112,38 +121,59 @@ class InstancesTab(RefreshableTab):
     def compose(self) -> ComposeResult:
         with Horizontal(id="instance-workspace"):
             with Vertical(id="instance-sidebar"):
-                yield Static("INSTANCES", classes="section-title", markup=False)
-                yield OptionList(id="instance-list", markup=False)
+                instance_list = OptionList(id="instance-list", markup=False)
+                instance_list.border_title = " Instances "
+                yield instance_list
                 with Horizontal(id="instance-list-actions"):
-                    yield Button("New", id="new-instance")
-                    yield Button("Delete", id="delete-instance")
+                    yield Button("New", id="new-instance", classes="action-accent")
+                    yield Button(
+                        "Delete",
+                        id="delete-instance",
+                        classes="action-danger",
+                    )
             with Vertical(id="instance-detail"):
                 yield Static("Select an instance", id="instance-summary")
                 yield Static("", id="empty-state", markup=False)
                 with Horizontal(id="play-actions"):
-                    yield Button("Launch", id="launch-instance")
-                    yield Button("Stop", id="stop-instance", disabled=True)
-                    yield Button("Build", id="build-instance")
-                yield Static("", id="instance-facts", markup=False)
+                    yield Button(
+                        "Launch",
+                        id="launch-instance",
+                        classes="action-primary",
+                    )
+                    yield Button(
+                        "Stop",
+                        id="stop-instance",
+                        classes="action-danger",
+                        disabled=True,
+                    )
+                    yield Button(
+                        "Build",
+                        id="build-instance",
+                        classes="action-accent",
+                    )
+                instance_facts = Static("", id="instance-facts", markup=False)
+                instance_facts.border_title = " Overview "
+                yield instance_facts
                 with Horizontal(id="manage-actions"):
                     yield Button("Configure", id="edit-instance")
                     yield Button("Manage mods", id="manage-mods")
-                    yield Button("Make active", id="make-active")
-                yield Static(
-                    "ENABLED MODS",
-                    classes="section-title",
-                    markup=False,
-                )
+                    yield Button(
+                        "Make active",
+                        id="make-active",
+                        classes="action-accent",
+                    )
                 mods: DataTable[str] = DataTable(id="enabled-mods", cursor_type="row")
                 mods.add_columns("order", "id", "name", "version")
+                mods.border_title = " Enabled mods "
                 yield mods
-                yield Static("ACTIVITY", classes="section-title", markup=False)
-                yield RichLog(
+                activity = RichLog(
                     id="activity-log",
                     markup=False,
                     highlight=False,
                     wrap=True,
                 )
+                activity.border_title = " Activity "
+                yield activity
 
     def refresh_from_disk(self) -> None:
         snapshot = self.launcher.snapshot()
@@ -171,13 +201,13 @@ class InstancesTab(RefreshableTab):
         self._refreshing = False
         self._render_selected(snapshot)
 
-    def _instance_label(self, name: str, active_name: str) -> str:
-        labels = [name]
+    def _instance_label(self, name: str, active_name: str) -> Text:
+        label = Text(name)
         if name == active_name:
-            labels.append("active")
+            label.append("  [active]", style="bold yellow")
         if name == self._session_instance and self._server_running:
-            labels.append("running")
-        return f"{labels[0]}  [{' · '.join(labels[1:])}]" if len(labels) > 1 else name
+            label.append("  [running]", style="bold green")
+        return label
 
     @property
     def _server_running(self) -> bool:
@@ -210,14 +240,18 @@ class InstancesTab(RefreshableTab):
         empty = self.query_one("#empty-state", Static)
         facts = self.query_one("#instance-facts", Static)
         if profile is None:
-            self.query_one("#instance-summary", Static).update("[b]No instances[/b]")
+            self.query_one("#instance-summary", Static).update(
+                Text("No instances", style="bold yellow")
+            )
             empty.update("Create an instance to begin.")
             facts.update("")
             self._sync_buttons()
             return
 
         empty.update("")
-        self.query_one("#instance-summary", Static).update(f"[b]{profile.name}[/b]")
+        self.query_one("#instance-summary", Static).update(
+            Text(profile.name, style="bold bright_cyan")
+        )
         installed_versions = {version.id for version in snapshot.versions}
         if not profile.version_id:
             version_text = "not selected — install or choose one in Library"
@@ -236,14 +270,35 @@ class InstancesTab(RefreshableTab):
             server_text = f"{self._session_instance} at {self._session.url}"
         else:
             server_text = "stopped"
-        facts.update(
-            f"Version     {version_text}\n"
-            f"Mods        {len(profile.mod_order)} enabled\n"
-            f"Port        {profile.port if profile.port is not None else 'global default'}\n"
-            f"Browser     {browser_text}\n"
-            f"Active      {active_text}\n"
-            f"Server      {server_text}"
+        fact_values = (
+            (
+                "Version",
+                version_text,
+                "red"
+                if profile.version_id and profile.version_id not in installed_versions
+                else "",
+            ),
+            ("Mods", f"{len(profile.mod_order)} enabled", ""),
+            (
+                "Port",
+                str(profile.port) if profile.port is not None else "global default",
+                "",
+            ),
+            ("Browser", browser_text, ""),
+            ("Active", active_text, "yellow" if active_text == "yes" else ""),
+            (
+                "Server",
+                server_text,
+                "green" if self._server_running else "",
+            ),
         )
+        fact_lines: list[Text] = []
+        for label, value, style in fact_values:
+            line = Text()
+            line.append(f"{label:<11}", style="bold yellow")
+            line.append(value, style=style)
+            fact_lines.append(line)
+        facts.update(Text("\n").join(fact_lines))
 
         mod_lookup = {mod.id: mod for mod in snapshot.mods}
         for position, mod_id in enumerate(profile.mod_order, 1):

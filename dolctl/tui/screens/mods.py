@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Button, Checkbox, DataTable, Input, Static
+from textual.widgets import Button, Checkbox, DataTable, Input
 
 from core.models import Mod, RemoveResult
 
@@ -16,13 +16,18 @@ class ModsTab(RefreshableTab):
     ModsTab #source { width: 1fr; margin-right: 1; }
     ModsTab #mod-id { width: 24; margin-right: 1; }
     ModsTab Checkbox { width: auto; margin-right: 1; }
-    ModsTab DataTable { height: 1fr; }
+    ModsTab DataTable {
+        height: 1fr;
+        border: round ansi_blue;
+        border-title-color: ansi_yellow;
+        border-title-background: ansi_default;
+        border-title-style: bold;
+    }
     ModsTab #actions { height: auto; padding-top: 1; }
     ModsTab Button { margin-right: 1; }
     """
 
     def compose(self) -> ComposeResult:
-        yield Static("[b]Mod library[/b]")
         with Horizontal(id="import"):
             yield Input(
                 placeholder="Path or https:// URL to a ModLoader zip",
@@ -30,13 +35,14 @@ class ModsTab(RefreshableTab):
             )
             yield Input(placeholder="id override", id="mod-id")
             yield Checkbox("replace", id="force")
-            yield Button("Import", id="import-button")
+            yield Button("Import", id="import-button", classes="action-primary")
         table: DataTable[str] = DataTable(id="mods", cursor_type="row")
         table.add_columns("id", "name", "version", "author", "source")
+        table.border_title = " Mod library "
         yield table
         with Horizontal(id="actions"):
-            yield Button("Info", id="info")
-            yield Button("Remove", id="remove")
+            yield Button("Info", id="info", classes="action-accent")
+            yield Button("Remove", id="remove", classes="action-danger")
 
     def refresh_from_disk(self) -> None:
         table = self.query_one("#mods", DataTable)

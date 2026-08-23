@@ -5,7 +5,7 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, DataTable, Select, Static
+from textual.widgets import Button, DataTable, Select
 
 from core.models import RemoteVersion, RemoveResult
 
@@ -15,12 +15,22 @@ from .base import RefreshableTab
 
 class VersionsTab(RefreshableTab):
     DEFAULT_CSS = """
-    VersionsTab #tables { height: 1fr; }
+    VersionsTab #source-row { height: auto; }
+    VersionsTab #source-row Select {
+        width: 1fr;
+        max-width: 40;
+    }
+    VersionsTab #tables { height: 1fr; min-height: 3; }
     VersionsTab #tables > Vertical { padding-right: 1; }
-    VersionsTab DataTable { height: 1fr; }
-    VersionsTab #source-row,
-    VersionsTab #actions { height: auto; padding-top: 1; }
-    VersionsTab #source-row Select { width: 32; }
+    VersionsTab DataTable {
+        height: 1fr;
+        border: round ansi_blue;
+        border-title-color: ansi_yellow;
+        border-title-background: ansi_default;
+        border-title-style: bold;
+    }
+    VersionsTab #actions { height: auto; padding-bottom: 1; }
+    VersionsTab #load { min-width: 8; }
     VersionsTab Button { margin-right: 1; }
     """
 
@@ -29,26 +39,34 @@ class VersionsTab(RefreshableTab):
         self._remote: dict[str, RemoteVersion] = {}
 
     def compose(self) -> ComposeResult:
+        with Horizontal(id="source-row"):
+            yield Select([], prompt="Source", id="version-source")
+            yield Button("Load", id="load", classes="action-accent")
+        with Horizontal(id="actions"):
+            yield Button("Latest", id="latest", classes="action-primary")
+            yield Button(
+                "Selected",
+                id="install-remote",
+                classes="action-primary",
+            )
+            yield Button("Import zip", id="import-zip", classes="action-accent")
+            yield Button(
+                "Import dir",
+                id="import-dir",
+                classes="action-accent",
+            )
+            yield Button("Remove", id="remove", classes="action-danger")
         with Horizontal(id="tables"):
             with Vertical():
-                yield Static("[b]Installed versions[/b]")
                 installed: DataTable[str] = DataTable(id="installed", cursor_type="row")
                 installed.add_columns("id", "channel", "name", "installed")
+                installed.border_title = " Installed versions "
                 yield installed
             with Vertical():
-                yield Static("[b]Remote releases[/b]")
-                with Horizontal(id="source-row"):
-                    yield Select([], prompt="Source", id="source")
-                    yield Button("Load", id="load")
                 remote: DataTable[str] = DataTable(id="remote", cursor_type="row")
                 remote.add_columns("id", "published", "asset")
+                remote.border_title = " Remote releases "
                 yield remote
-        with Horizontal(id="actions"):
-            yield Button("Install latest", id="latest")
-            yield Button("Install selected", id="install-remote")
-            yield Button("Import zip", id="import-zip")
-            yield Button("Import directory", id="import-dir")
-            yield Button("Remove", id="remove")
 
     def refresh_from_disk(self) -> None:
         snapshot = self.launcher.snapshot()
@@ -62,7 +80,7 @@ class VersionsTab(RefreshableTab):
                 version.installed_at,
                 key=version.id,
             )
-        select = self.query_one("#source", Select)
+        select = self.query_one("#version-source", Select)
         previous = None if select.is_blank() else str(select.value)
         names = [name for name, _channel in snapshot.channels]
         select.set_options([(name, name) for name in names])
@@ -78,7 +96,7 @@ class VersionsTab(RefreshableTab):
             self.query_one("#remote", DataTable).clear()
 
     def _source(self) -> str | None:
-        select = self.query_one("#source", Select)
+        select = self.query_one("#version-source", Select)
         return None if select.is_blank() else str(select.value)
 
     @staticmethod

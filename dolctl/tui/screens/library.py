@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.widgets import Button, Static
@@ -26,7 +27,7 @@ class LibraryScreen(Container):
     }
 
     LibraryScreen #library-navigation {
-        height: 3;
+        height: 2;
         padding-bottom: 1;
     }
 
@@ -48,15 +49,20 @@ class LibraryScreen(Container):
     """
 
     def compose(self) -> ComposeResult:
-        yield Static(
-            "[b]Library[/b]\nInstall game versions and mods before assigning them "
-            "to an instance.",
-            id="library-heading",
+        heading = Text("Library", style="bold yellow")
+        heading.append(
+            "\nInstall game versions and mods before assigning them to an instance.",
+            style="bright_black",
         )
+        yield Static(heading, id="library-heading")
         with Horizontal(id="library-navigation"):
-            yield Button("Versions", id="library-versions", classes="-current")
-            yield Button("Mods", id="library-mods")
-            yield Button("Sources", id="library-sources")
+            yield Button(
+                "Versions",
+                id="library-versions",
+                classes="subnav-button -current",
+            )
+            yield Button("Mods", id="library-mods", classes="subnav-button")
+            yield Button("Sources", id="library-sources", classes="subnav-button")
         with Container(id="library-content"):
             yield VersionsTab(
                 id="versions-section",
