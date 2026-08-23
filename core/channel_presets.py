@@ -64,6 +64,42 @@ PRESETS: dict[str, ChannelPreset] = {
         asset_regex=r"DOLI\.mod\.zip",
         description="Degrees of Lewdity Intelligence Mod.",
     ),
+    "cheat-lyra": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="DoL-Lyra/Cheat",
+        asset_regex=r"Cheat-Lyra-v.*\.mod\.zip",
+        description="Lyra cheat and feat-unlock Mod.",
+    ),
+    "combat-status-display-lyra": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="DoL-Lyra/CombatStatusDisplay",
+        asset_regex=r"CombatStatusDisplay-Lyra-v.*\.mod\.zip",
+        description="Lyra enemy HP and AP display Mod.",
+    ),
+    "au-female-model-058": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="AOKIUTAGE/UTAGEsDOL3.0",
+        # The 0.8.x line targets DoL 0.5.8.x; newer assets share this release.
+        asset_regex=r"AUfemale\.model_v0\.8\.[0-9]+\.zip",
+        description="AU female model for DoL 0.5.8.x.",
+    ),
+    "ausdol-facial-expansion": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="AOKIUTAGE/UTAGEsDOL3.0",
+        asset_regex=r"AUsDoL\.facial\.expansion\.mod\.zip",
+        description="AUsDoL facial expansion Mod.",
+    ),
+    "ucb": ChannelPreset(
+        kind="mod",
+        provider="github",
+        repo="site098/mysterious",
+        asset_regex=r"default\.zip",
+        description="Upstream Universal Combat Beautification Mod.",
+    ),
 }
 
 

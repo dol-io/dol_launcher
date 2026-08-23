@@ -179,7 +179,11 @@ matching installer. Missing `kind` fields from older configurations read as
 `game`. Built-in presets are static, reviewed GitHub Releases sources rather
 than a remotely controlled marketplace. A fresh ROOT configures the
 `dol-modloader` game preset; the opt-in presets are `dol-modloader-zh` for a
-localised game build and `dol-image-pack`, `dol-i18n-zh`, and `doli` for Mods.
+localised game build and `dol-image-pack`, `dol-i18n-zh`, `doli`,
+`cheat-lyra`, `combat-status-display-lyra`, `au-female-model-058`,
+`ausdol-facial-expansion`, and `ucb` for Mods. Compatibility-specific presets
+may intentionally narrow their asset regex; the launcher does not infer game
+and Mod compatibility.
 
 `.dolctl/state.toml`:
 

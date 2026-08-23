@@ -35,30 +35,51 @@ def test_channel_lifecycle_and_cache_invalidation(launcher: Launcher) -> None:
 def test_built_in_presets_cover_common_game_and_mod_releases() -> None:
     presets = dict(Launcher.channel_presets())
     assert set(presets) == {
+        "au-female-model-058",
+        "ausdol-facial-expansion",
+        "cheat-lyra",
+        "combat-status-display-lyra",
         "dol-i18n-zh",
         "dol-image-pack",
         "dol-modloader",
         "dol-modloader-zh",
         "doli",
+        "ucb",
     }
     assert presets["dol-modloader"].kind == "game"
     assert presets["dol-modloader-zh"].kind == "game"
     assert presets["dol-image-pack"].kind == "mod"
     assert presets["dol-i18n-zh"].kind == "mod"
     assert presets["doli"].kind == "mod"
+    assert presets["cheat-lyra"].kind == "mod"
+    assert presets["combat-status-display-lyra"].kind == "mod"
+    assert presets["au-female-model-058"].kind == "mod"
+    assert presets["ausdol-facial-expansion"].kind == "mod"
+    assert presets["ucb"].kind == "mod"
 
     known_assets = {
+        "au-female-model-058": "AUfemale.model_v0.8.7.zip",
+        "ausdol-facial-expansion": "AUsDoL.facial.expansion.mod.zip",
+        "cheat-lyra": "Cheat-Lyra-v1.1.3.mod.zip",
+        "combat-status-display-lyra": (
+            "CombatStatusDisplay-Lyra-v1.0.1.mod.zip"
+        ),
         "dol-modloader": "DoL-ModLoader-2.101.1-dol-0.5.11.9-deadbeef.zip",
         "dol-modloader-zh": "DoL-ModLoader-0.5.11.9-v2.101.1.zip",
         "dol-image-pack": "GameOriginalImagePack.mod.zip",
         "dol-i18n-zh": "ModI18N-0.5.11.9-chs-1.0.0a.mod.zip",
         "doli": "DOLI.mod.zip",
+        "ucb": "default.zip",
     }
     for key, asset in known_assets.items():
         assert re.fullmatch(presets[key].asset_regex, asset)
     assert not re.fullmatch(
         presets["dol-modloader-zh"].asset_regex,
         "DoL-ModLoader-0.5.11.9-v2.101.1-polyfill.zip",
+    )
+    assert not re.fullmatch(
+        presets["au-female-model-058"].asset_regex,
+        "AUfemale.model_v0.9.3.zip",
     )
 
 

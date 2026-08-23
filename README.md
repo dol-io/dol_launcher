@@ -91,6 +91,11 @@ uv run dolctl --root "$GAME_ROOT" instance configure default \
 | `dol-image-pack` | mod | 原图包 |
 | `dol-i18n-zh` | mod | 中文 I18N Mod |
 | `doli` | mod | Degrees of Lewdity Intelligence |
+| `cheat-lyra` | mod | Lyra 作弊与成就解锁 |
+| `combat-status-display-lyra` | mod | Lyra 敌人 HP/AP 显示 |
+| `au-female-model-058` | mod | 适配 DoL 0.5.8.x 的 AU 女性模型 |
+| `ausdol-facial-expansion` | mod | AUsDoL 面部扩展 |
+| `ucb` | mod | 通用战斗美化上游版 |
 
 可以在 TUI 的 `Library → Sources` 选择 `Add preset`，或使用 CLI：
 
@@ -105,6 +110,11 @@ uv run dolctl --root "$GAME_ROOT" channel add doli --preset doli
 uv run dolctl --root "$GAME_ROOT" mod remote --channel doli
 uv run dolctl --root "$GAME_ROOT" mod install latest --channel doli
 ```
+
+`au-female-model-058` 特意只匹配 AU 0.8.x：该分支与你现有的 DoL 0.5.8.x
+实例兼容，不会误装同一个 Release 中面向新游戏版本的 0.9.x 包。`ucb` 指向原始
+通用战斗美化；`UCB-zedfix` 是二改包，目前没有独立、稳定的 GitHub Release，
+因此不能安全地伪装成可自动更新的来源。
 
 也可以添加自己的 GitHub Releases 来源：
 
