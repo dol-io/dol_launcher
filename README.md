@@ -1,14 +1,19 @@
-# DoL Launcher
+# dolctl
 
-**dolctl** 是一个 Degrees of Lewdity (DoL) 启动器 CLI 工具，支持多版本管理、Profile 切换和本地 HTTP 服务启动。
+`dolctl` 是一个简洁的 Degrees of Lewdity 本地启动器。它采用类似 Prism
+Launcher 的实例模型：每个实例独立选择游戏版本、启用的 Mod 顺序和启动设置，
+日常使用只需要选中实例并启动。
 
-**dolctl** is a CLI launcher for Degrees of Lewdity (DoL) that supports multi-version management, profile switching, and local HTTP serving.
+项目同时提供：
 
-## 安装 / Installation
+- Textual TUI：主要交互界面；
+- Typer CLI：适合脚本和终端工作流；
+- 同一套核心逻辑：两种界面的安装、构建与启动行为一致。
 
-需要 Python >= 3.11 和 [uv](https://docs.astral.sh/uv/)。
+## 安装
 
-Requires Python >= 3.11 and [uv](https://docs.astral.sh/uv/).
+需要 Python 3.11 或更高版本，以及
+[uv](https://docs.astral.sh/uv/)。
 
 ```bash
 git clone <repo-url>
@@ -16,157 +21,141 @@ cd dol_launcher
 uv sync
 ```
 
-## 快速开始 / Quick Start
+## 最快上手
 
 ```bash
-# 初始化根目录 / Initialize root directory
-dolctl init ~/Games/DoL
-cd ~/Games/DoL
+# 1. 创建一个完全独立的游戏目录
+uv run dolctl init ~/Games/DoL
 
-# 从本地 zip 安装版本 / Install a version from local zip
-dolctl install --file /path/to/dol.zip --as vanilla-0.5.3
-
-# 设置当前 profile 使用该版本 / Set profile to use this version
-dolctl use vanilla-0.5.3
-
-# 构建并启动 / Build and launch
-dolctl run --port 8799
+# 2. 打开启动器界面
+uv run dolctl --root ~/Games/DoL tui
 ```
 
-浏览器会自动打开 `http://127.0.0.1:8799/`，按 `Ctrl+C` 停止服务。
+TUI 有五个页面：
 
-The browser will open `http://127.0.0.1:8799/` automatically. Press `Ctrl+C` to stop.
+1. `Instances`：创建实例、选择版本、调整 Mod 顺序、构建和启动；
+2. `Versions`：安装本地或远程版本；
+3. `Mods`：管理本地 Mod 库；
+4. `Sources`：管理 GitHub 发布源；
+5. `System`：查看 ROOT 和诊断结果。
 
-## 命令参考 / Command Reference
+快捷键 `1`–`5` 切换页面，`F5` 刷新，`q` 退出。在实例页用空格切换
+Mod，`+`/`-` 调整加载顺序。
 
-### 全局选项 / Global Options
+## CLI 工作流
 
-| 选项 / Option | 说明 / Description |
-|---|---|
-| `--root`, `-r` | 指定根目录 / Specify root directory |
-| `--version` | 显示版本号 / Show version |
-
-也可通过环境变量 `DOLCTL_ROOT` 指定根目录，或在根目录内任意子目录运行时自动检测。
-
-You can also set `DOLCTL_ROOT` environment variable, or run from any subdirectory within the root.
-
-### 初始化与诊断 / Init & Diagnostics
+### 从本地安装
 
 ```bash
-dolctl init <dir>     # 初始化根目录 / Initialize root directory
-dolctl where          # 显示当前根目录 / Show current root
-dolctl doctor         # 检查目录完整性 / Check directory integrity
+GAME_ROOT=~/Games/DoL
+
+uv run dolctl --root "$GAME_ROOT" version install \
+  --file /path/to/game.zip --as game
+uv run dolctl --root "$GAME_ROOT" instance configure default --version game
+
+uv run dolctl --root "$GAME_ROOT" mod add /path/to/example.mod.zip --id example
+uv run dolctl --root "$GAME_ROOT" instance mod add example
+
+uv run dolctl --root "$GAME_ROOT" run default
 ```
 
-### 版本管理 / Version Management
+`run` 会按需构建实例、启动 loopback HTTP 服务，并依据设置打开浏览器。按
+`Ctrl+C` 停止服务。
+
+### 从远程安装
+
+新 ROOT 已预置可直接使用的 ModLoader GitHub 来源：
 
 ```bash
-dolctl version list                        # 列出已安装版本 / List installed versions
-dolctl version remote list                 # 列出远程可用版本 / List remote versions
-dolctl install --file <zip> --as <id>      # 从 zip 安装 / Install from zip
-dolctl install --dir <path> --as <id>      # 从目录安装 / Install from directory
-dolctl install latest --channel vanilla    # 从远程下载 / Download from remote
-dolctl use <version_id>                    # 切换版本 / Switch version
-dolctl version remove <version_id>         # 删除已安装版本 / Remove installed version
+uv run dolctl --root "$GAME_ROOT" version remote --channel modloader
+uv run dolctl --root "$GAME_ROOT" version install latest --channel modloader
+uv run dolctl --root "$GAME_ROOT" instance configure default \
+  --version <安装后显示的版本-id>
 ```
 
-### Mod 管理 / Mod Management
+也可以添加自己的 GitHub Releases 来源：
 
 ```bash
-dolctl mod list                              # 列出已安装 mod / List installed mods
-dolctl mod add <path_or_url> [--id <id>]     # 导入 mod / Import a mod
-dolctl mod add <path> --force                # 覆盖同名 mod / Overwrite existing mod
-dolctl mod remove <mod_id>                   # 删除 mod / Remove a mod
-dolctl mod info <mod_id>                     # 查看 mod 详情 / Show mod metadata
+uv run dolctl --root "$GAME_ROOT" channel add custom \
+  --repo owner/repository --asset-regex 'game-.*\.zip'
 ```
 
-### Profile 管理 / Profile Management
+`asset_regex` 使用完整匹配。若设置了 `GITHUB_TOKEN`，远程请求会携带它，
+以减少 GitHub 匿名 API 限流。
 
-```bash
-dolctl profile list                            # 列出 profile / List profiles
-dolctl profile create <name>                   # 创建 profile / Create profile
-dolctl profile use <name>                      # 切换活跃 profile / Switch active profile
-dolctl profile set-version <id>                # 设置 profile 版本 / Set profile version
-dolctl profile mod add <mod_id>                # 启用 mod / Enable a mod in profile
-dolctl profile mod remove <mod_id>             # 禁用 mod / Disable a mod in profile
-dolctl profile mod list                        # 列出 profile 内 mod 顺序 / List mods in profile
-dolctl profile mod reorder <id1> <id2> ...     # 重新排序 mod / Reorder mods (full list required)
+官方 vanilla 目前不通过 GitHub Releases 分发，因此请从官方页面下载 zip 后，
+使用 `version install --file ...` 导入；启动器不会内置一个已失效的 GitHub 镜像。
+
+## 常用命令
+
+```text
+dolctl init <dir>
+dolctl where
+dolctl doctor
+dolctl tui
+
+dolctl instance list
+dolctl instance create <name> [--version <id>] [--select]
+dolctl instance select <name>
+dolctl instance show [<name>]
+dolctl instance configure [<name>] [--version <id>] [--port <port>]
+dolctl instance delete <name>
+dolctl instance mod list|add|remove|reorder ...
+
+dolctl version list
+dolctl version remote [--channel <name>] [--refresh]
+dolctl version install [latest|<id>] [--channel <name>]
+                       [--file <zip> | --dir <path>] [--as <id>] [--force]
+dolctl version remove <id> [--force]
+
+dolctl mod list
+dolctl mod add <path-or-url> [--id <id>] [--force]
+dolctl mod info <id>
+dolctl mod remove <id>
+
+dolctl channel list
+dolctl channel preset
+dolctl channel add <name> (--preset <preset> | --repo <owner/repo>)
+dolctl channel remove <name>
+
+dolctl build [<instance>] [--clean]
+dolctl run [<instance>] [--port <port>] [--no-browser] [--allow-lan]
+dolctl serve [<instance>] [--port <port>] [--allow-lan]
 ```
 
-### 构建与运行 / Build & Run
+ROOT 的解析顺序是 `--root`、`DOLCTL_ROOT`、从当前目录向父目录搜索。
+除 `init` 外，命令不会隐式创建 ROOT。
 
-```bash
-dolctl build --profile <name>               # 构建运行目录 / Build runtime
-dolctl run --port 8799                      # 构建并启动服务 / Build and serve
-dolctl run --port 8799 --no-browser         # 不自动打开浏览器 / Don't open browser
-dolctl serve --port 8799 --allow-lan        # 仅启动已构建的服务并允许局域网访问 / Serve existing build and allow lan access
-```
+`serve` 只服务已有且仍然有效的构建；`run` 会先检查构建缓存并在需要时重建。
+默认只监听 `127.0.0.1`，只有显式传入 `--allow-lan` 才允许局域网访问。
 
-### TUI 模式 / Interactive TUI
+## 数据目录
 
-```bash
-dolctl tui                                  # 打开交互式 TUI / Launch interactive TUI
-```
+所有运行数据都位于用户选择的 ROOT 下：
 
-七个 tab 覆盖所有命令：Home、Channels、Versions、Mods、Profiles、Run、Doctor。键位 `1`-`7` 切 tab，`F5` 刷新当前 tab，`q` 退出。Profiles tab 内 `空格` 切换 mod 启停、`+`/`-` 调整启用顺序。
-
-Seven tabs cover the full command surface: Home, Channels, Versions, Mods, Profiles, Run, Doctor. Hotkeys: `1`-`7` switch tab, `F5` refresh, `q` quit. Inside the Profiles tab, `space` toggles a mod's enabled state and `+`/`-` reorder enabled mods.
-
-## 远程渠道 / Remote Channels
-
-最快方式是直接用内置预设：
-
-The quickest path is the built-in preset:
-
-```bash
-dolctl channel preset list                        # 查看可用预设 / list available presets
-dolctl channel add vanilla --preset dol-vanilla   # 配好一个 channel / configure one channel
-dolctl version remote list --channel vanilla     # 列出可下载版本 / list remote versions
-dolctl install latest --channel vanilla          # 安装最新版本 / install the latest
-```
-
-也可自行指定参数：
-
-Or supply the fields explicitly:
-
-```bash
-dolctl channel add vanilla \
-    --provider github \
-    --repo Vrelnir/degrees-of-lewdity \
-    --asset-regex "Degrees of Lewdity.*\.zip"
-```
-
-- `repo` 指向 `owner/name` 形式的 GitHub 仓库。
-- `asset_regex` 用 `re.fullmatch` 校验，过于宽松会匹配到 source-code zip，请尽量精确。
-- 设了 `GITHUB_TOKEN` 环境变量可避免命中匿名访问的速率限制。
-- `dolctl channel set` / `dolctl channel remove` 可继续维护已有 channel。
-
-- `repo` is a GitHub `owner/name` slug.
-- `asset_regex` is matched with `re.fullmatch`; an overly broad pattern may match source archives, so be specific.
-- Set `GITHUB_TOKEN` to avoid anonymous GitHub API rate limits.
-- Use `dolctl channel set` / `dolctl channel remove` to maintain channels later.
-
-## 目录结构 / Directory Layout
-
-```
+```text
 <ROOT>/
-  .dolctl/
-    config.toml       # 全局配置 / Global config
-    state.toml        # 状态 / State
-    cache/            # 缓存 / Cache
-    logs/             # 日志 / Logs
-  versions/           # 已安装版本 / Installed versions
-  profiles/           # Profile 配置 / Profile configs
-  runtime/            # 构建输出 / Build output
+  .dolctl/          配置、状态、缓存、日志和临时 staging
+  versions/         已安装的不可变游戏版本
+  mods/             本地 Mod 库
+  profiles/         实例配置（保留旧版目录名以兼容已有数据）
+  runtime/          每个实例的构建结果
 ```
 
-## 许可 / License
+版本、Mod、实例和运行目录都通过 staging + 原子替换发布。下载先写入 `.part`，
+zip 解压会拒绝路径穿越、符号链接和异常膨胀包。
 
-见 [LICENSE](LICENSE)。 / See [LICENSE](LICENSE).
+完整格式和行为约束见 [`intro.md`](intro.md)。
 
-## 致谢 / Credits
+## 开发与验证
 
-Mod 管理与构建逻辑参考了 [DoL-Lyra/Lyra](https://github.com/DoL-Lyra/Lyra) 的架构设计与部分实现思路，包括 ModLoader 注入方式、mod 组合管理模式等。该项目基于 MIT 协议开源（Copyright (c) 2024 Sakari）。
+```bash
+uv run --frozen pytest
+uv run --frozen ruff check .
+uv run --frozen mypy dolctl core infra providers tests
+```
 
-The mod management and build logic is inspired by and partially adapted from [DoL-Lyra/Lyra](https://github.com/DoL-Lyra/Lyra), including its ModLoader injection approach and mod combination management patterns. Lyra is MIT-licensed (Copyright (c) 2024 Sakari).
-Summarized
+## License
+
+见 [`LICENSE`](LICENSE)。ModLoader 注入思路参考了 MIT 许可的
+[DoL-Lyra/Lyra](https://github.com/DoL-Lyra/Lyra)。

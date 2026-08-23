@@ -1,79 +1,106 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
+import re
 from typing import Any
 
-from core.models import ChannelConfig, RemoteVersion
+from core.models import ProgressCallback, RemoteVersion, ValidationError
 from infra.net import download_file, fetch_json
 
 
+_REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+
+
 class GitHubReleasesProvider:
-    """Read release assets from a GitHub repo via the public API.
-
-    Honours an optional ``GITHUB_TOKEN`` environment variable to lift the
-    anonymous rate limit during repeated fetches.
-    """
-
-    def __init__(self, channel: str, repo: str, asset_regex: str) -> None:
+    def __init__(self, channel: str, repository: str, asset_regex: str) -> None:
+        if not _REPOSITORY.fullmatch(repository):
+            raise ValidationError(
+                f"GitHub repository must use owner/name syntax: {repository!r}"
+            )
+        try:
+            pattern = re.compile(asset_regex)
+        except re.error as exc:
+            raise ValidationError(f"Invalid asset regex: {exc}") from exc
         self.channel = channel
-        self.repo = repo
-        self.asset_pattern = re.compile(asset_regex)
+        self.repository = repository
+        self.asset_pattern = pattern
 
-    # ---- internal helpers ---------------------------------------------------
-
-    def _headers(self) -> dict[str, str] | None:
+    @staticmethod
+    def _headers() -> dict[str, str]:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
         token = os.environ.get("GITHUB_TOKEN")
-        if not token:
-            return None
-        return {"Authorization": f"Bearer {token}"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
-    def _select_asset(self, assets: list[dict[str, Any]]) -> dict[str, Any] | None:
+    def _matching_asset(self, assets: Any) -> dict[str, Any] | None:
+        if not isinstance(assets, list):
+            return None
         for asset in assets:
+            if not isinstance(asset, dict):
+                continue
             name = str(asset.get("name", ""))
             if self.asset_pattern.fullmatch(name):
                 return asset
         return None
 
-    # ---- VersionProvider protocol -------------------------------------------
-
     def list_versions(self) -> list[RemoteVersion]:
-        url = f"https://api.github.com/repos/{self.repo}/releases?per_page=30"
-        data = fetch_json(url, headers=self._headers())
+        url = f"https://api.github.com/repos/{self.repository}/releases?per_page=100"
+        payload = fetch_json(url, headers=self._headers())
+        if not isinstance(payload, list):
+            raise ValueError("GitHub releases response is not an array")
+
         versions: list[RemoteVersion] = []
-        for release in data:
-            asset = self._select_asset(release.get("assets", []))
+        for release in payload:
+            if not isinstance(release, dict) or release.get("draft") is True:
+                continue
+            asset = self._matching_asset(release.get("assets"))
             if asset is None:
                 continue
-            tag = str(release.get("tag_name") or "")
-            name = str(release.get("name") or tag)
-            published_at = str(
-                release.get("published_at") or release.get("created_at") or ""
+            download_url = str(asset.get("browser_download_url") or "")
+            if not download_url:
+                continue
+            asset_digest = str(asset.get("digest") or "")
+            sha256 = (
+                asset_digest.removeprefix("sha256:").lower()
+                if re.fullmatch(r"sha256:[0-9a-fA-F]{64}", asset_digest)
+                else None
             )
+            tag = str(release.get("tag_name") or "")
+            display_name = str(release.get("name") or tag)
+            if not tag and not display_name:
+                continue
             versions.append(
                 RemoteVersion(
-                    id=tag or name,
-                    display_name=name or tag,
+                    id=tag or display_name,
+                    display_name=display_name or tag,
                     channel=self.channel,
-                    published_at=published_at,
-                    asset_name=str(asset.get("name", "")),
-                    download_url=str(asset.get("browser_download_url", "")),
-                    source_ref=str(release.get("html_url", "")),
+                    published_at=str(
+                        release.get("published_at") or release.get("created_at") or ""
+                    ),
+                    asset_name=str(asset.get("name") or "download.zip"),
+                    download_url=download_url,
+                    source_ref=str(release.get("html_url") or ""),
+                    sha256=sha256,
                 )
             )
         return versions
 
-    def download(self, version: RemoteVersion, dest: Path, *, progress=None) -> str:
+    def download(
+        self,
+        version: RemoteVersion,
+        destination: Path,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> str:
         return download_file(
-            version.download_url, dest, headers=self._headers(), progress=progress
+            version.download_url,
+            destination,
+            headers=self._headers(),
+            progress=progress,
+            expected_sha256=version.sha256,
         )
-
-
-# Register under the "github" provider key so channels with
-# provider = "github" resolve here. Imported eagerly from providers/__init__.
-from . import register  # noqa: E402
-
-@register("github")
-def _factory(channel_name: str, config: ChannelConfig) -> GitHubReleasesProvider:
-    return GitHubReleasesProvider(channel_name, config.repo, config.asset_regex)

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import hashlib
 import os
+from pathlib import Path
 import socket
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -10,19 +10,28 @@ from urllib.parse import urlparse
 import httpx
 
 
-# A progress callback receives (downloaded_bytes, total_bytes_or_None).
-# total is None when the server omits Content-Length. Implementations
-# should be cheap — download_file invokes it once per network chunk.
 ProgressCallback = Callable[[int, int | None], None]
 
 
+_USER_AGENT = "dolctl/0.2"
+
+
 def is_url(value: str) -> bool:
-    parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"}
+    return urlparse(value).scheme.lower() in {"http", "https"}
 
 
-def fetch_json(url: str, headers: dict[str, str] | None = None, timeout: float = 30.0) -> Any:
-    with httpx.Client(timeout=timeout, headers=headers) as client:
+def fetch_json(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: float = 30.0,
+) -> Any:
+    request_headers = {"User-Agent": _USER_AGENT, **(headers or {})}
+    with httpx.Client(
+        timeout=timeout,
+        headers=request_headers,
+        follow_redirects=True,
+    ) as client:
         response = client.get(url)
         response.raise_for_status()
         return response.json()
@@ -30,51 +39,54 @@ def fetch_json(url: str, headers: dict[str, str] | None = None, timeout: float =
 
 def download_file(
     url: str,
-    dest: Path,
+    destination: Path,
+    *,
     headers: dict[str, str] | None = None,
     timeout: float = 60.0,
     progress: ProgressCallback | None = None,
+    expected_sha256: str | None = None,
 ) -> str:
-    """Download *url* to *dest* atomically and return the sha256 of the body.
-
-    The body is streamed to a ``<dest>.part`` file and only renamed to *dest*
-    after a successful transfer. If the transfer fails or is interrupted, the
-    partial file is removed so the next attempt starts clean.
-
-    When *progress* is given, it is called once per network chunk with the
-    cumulative byte count and the total from the ``Content-Length`` header
-    (or ``None`` if the server didn't send one).
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    part = dest.with_name(dest.name + ".part")
-    hasher = hashlib.sha256()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    partial = destination.with_name(f"{destination.name}.part")
+    request_headers = {"User-Agent": _USER_AGENT, **(headers or {})}
+    digest = hashlib.sha256()
+    downloaded = 0
     try:
-        with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=timeout,
+            headers=request_headers,
+            follow_redirects=True,
+        ) as client:
             with client.stream("GET", url) as response:
                 response.raise_for_status()
-                total_header = response.headers.get("content-length")
-                total = int(total_header) if total_header and total_header.isdigit() else None
-                downloaded = 0
-                with part.open("wb") as handle:
+                header = response.headers.get("content-length", "")
+                total = int(header) if header.isdigit() else None
+                with partial.open("wb") as handle:
                     for chunk in response.iter_bytes():
                         if not chunk:
                             continue
                         handle.write(chunk)
-                        hasher.update(chunk)
+                        digest.update(chunk)
                         downloaded += len(chunk)
                         if progress is not None:
                             progress(downloaded, total)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+        actual_sha256 = digest.hexdigest()
+        if expected_sha256 and actual_sha256.lower() != expected_sha256.lower():
+            raise ValueError(
+                "Downloaded file checksum mismatch: "
+                f"expected {expected_sha256}, got {actual_sha256}"
+            )
+        os.replace(partial, destination)
     except BaseException:
-        if part.exists():
-            part.unlink()
+        partial.unlink(missing_ok=True)
         raise
-    os.replace(part, dest)
-    return hasher.hexdigest()
+    return actual_sha256
 
 
 def is_port_available(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
         except OSError:
@@ -83,8 +95,7 @@ def is_port_available(host: str, port: int) -> bool:
 
 
 def find_available_port(host: str, start_port: int, max_tries: int = 50) -> int | None:
-    for offset in range(max_tries):
-        port = start_port + offset
+    for port in range(start_port, min(65536, start_port + max_tries)):
         if is_port_available(host, port):
             return port
     return None

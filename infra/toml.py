@@ -2,19 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 import tomllib
+
 import tomli_w
+
+from .fs import atomic_write_text
 
 
 def read_toml(path: Path) -> dict:
-    if not path.exists():
-        return {}
     with path.open("rb") as handle:
-        return tomllib.load(handle)
+        data = tomllib.load(handle)
+    if not isinstance(data, dict):
+        raise tomllib.TOMLDecodeError("Top-level TOML value must be a table")
+    return data
 
 
 def write_toml(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     content = tomli_w.dumps(data)
     if not content.endswith("\n"):
         content += "\n"
-    path.write_text(content, encoding="utf-8")
+    atomic_write_text(path, content)

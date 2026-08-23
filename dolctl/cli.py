@@ -1,143 +1,131 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Optional
+from dataclasses import dataclass
 import functools
 import inspect
+import logging
+from pathlib import Path
+import time
+from typing import Callable, cast, Optional
 
 import typer
 
-from . import __version__
-from core.build import build_runtime
-from core.channel_presets import PRESETS
-from core.channels import (
-    add_channel,
-    get_channel,
-    list_channels,
-    remove_channel,
-    set_channel_fields,
-)
-from core.mods import (
-    add_mod_from_zip,
-    get_mod_info,
-    list_mods,
-    remove_mod,
-)
-from core.profiles import (
-    add_mod_to_profile,
-    create_profile,
-    get_profile,
-    list_profiles,
-    remove_mod_from_profile,
-    reorder_mods,
-    set_active_profile,
-    set_profile_version,
-)
-from core.root import init_root, load_config, load_state, resolve_root
-from core.run import prepare_run
-from core.serve import create_server
-from core.versions import (
-    install_from_dir,
-    install_from_file,
-    install_from_remote,
-    list_installed,
-    list_remote_versions,
-    remove_version,
-)
-from infra.log import log_error, setup_logging
-from infra.open import open_browser
+from core.launcher import Launcher
 from core.models import DolCtlError
 
-app = typer.Typer(add_completion=False)
-version_app = typer.Typer()
-version_remote_app = typer.Typer()
-profile_app = typer.Typer()
-profile_mod_app = typer.Typer()
-mod_app = typer.Typer()
-channel_app = typer.Typer()
-channel_preset_app = typer.Typer()
+from . import __version__
 
 
-def _get_root(ctx: typer.Context) -> Path:
-    cli_root = ctx.obj.get("root") if ctx.obj else None
-    return resolve_root(cli_root)
+app = typer.Typer(add_completion=False, no_args_is_help=True)
+instance_app = typer.Typer(no_args_is_help=True)
+instance_mod_app = typer.Typer(no_args_is_help=True)
+version_app = typer.Typer(no_args_is_help=True)
+mod_app = typer.Typer(no_args_is_help=True)
+channel_app = typer.Typer(no_args_is_help=True)
 
 
-def _resolve_profile_name(root: Path, profile_name: Optional[str]) -> str:
-    if profile_name:
-        return profile_name
-    state = load_state(root)
-    if state.active_profile:
-        return state.active_profile
-    config = load_config(root)
-    return config.default_profile
+@dataclass(slots=True)
+class CliState:
+    root: Path | None
+    verbose: bool
+    launcher: Launcher | None = None
 
 
-def _handle_error(ctx: typer.Context, exc: DolCtlError) -> None:
-    root = None
-    try:
-        root = _get_root(ctx)
-    except DolCtlError:
-        root = None
-    if root is not None:
-        log_error(root, str(exc), exc)
-    typer.echo(f"Error: {exc}", err=True)
-    raise typer.Exit(code=1)
+def _state(ctx: typer.Context) -> CliState:
+    if not isinstance(ctx.obj, CliState):
+        raise RuntimeError("CLI context was not initialised")
+    return ctx.obj
 
 
-def _extract_ctx(
-    sig: inspect.Signature, args: tuple, kwargs: dict
-) -> Optional[typer.Context]:
-    """Pull the ``ctx`` argument out of a call, if the signature declares one.
+def _launcher(ctx: typer.Context) -> Launcher:
+    state = _state(ctx)
+    if state.launcher is None:
+        state.launcher = Launcher.open(state.root)
+        state.launcher.configure_logging(verbose=state.verbose)
+    return state.launcher
 
-    Typer guarantees the value is a ``typer.Context`` (a ``click.Context``
-    subclass) when it dispatches, so we trust the signature without an
-    isinstance probe.
-    """
-    params = list(sig.parameters)
-    if "ctx" not in params:
+
+def _extract_context(
+    signature: inspect.Signature, args: tuple[object, ...], kwargs: dict[str, object]
+) -> typer.Context | None:
+    names = list(signature.parameters)
+    if "ctx" not in names:
         return None
-    if "ctx" in kwargs:
-        return kwargs["ctx"]
-    idx = params.index("ctx")
-    return args[idx] if idx < len(args) else None
+    value = kwargs.get("ctx")
+    if isinstance(value, typer.Context):
+        return value
+    index = names.index("ctx")
+    if index < len(args) and isinstance(args[index], typer.Context):
+        return cast(typer.Context, args[index])
+    return None
 
 
-def with_errors(func):
-    sig = inspect.signature(func)
+def with_errors(function: Callable):
+    signature = inspect.signature(function)
 
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    @functools.wraps(function)
+    def wrapped(*args: object, **kwargs: object):
         try:
-            return func(*args, **kwargs)
+            return function(*args, **kwargs)
+        except (typer.Exit, typer.Abort, typer.BadParameter):
+            raise
         except DolCtlError as exc:
-            ctx = _extract_ctx(sig, args, kwargs)
-            if ctx is not None:
-                _handle_error(ctx, exc)
-            else:
-                typer.echo(f"Error: {exc}", err=True)
-                raise typer.Exit(code=1) from exc
+            logger = logging.getLogger("dolctl")
+            if logger.handlers:
+                logger.error("%s", exc, exc_info=exc)
+            typer.echo(f"Error: {exc}", err=True)
+            raise typer.Exit(1) from exc
+        except Exception as exc:
+            logger = logging.getLogger("dolctl")
+            if logger.handlers:
+                logger.exception("Unexpected launcher failure")
+            typer.echo(f"Unexpected error: {exc}", err=True)
+            context = _extract_context(signature, args, kwargs)
+            if context is not None and _state(context).verbose:
+                typer.echo("See the traceback in the launcher log.", err=True)
+            raise typer.Exit(1) from exc
 
-    wrapper.__signature__ = sig
-    return wrapper
+    setattr(wrapped, "__signature__", signature)
+    return wrapped
 
 
-@app.callback(invoke_without_command=True)
-@with_errors
+def _progress(label: str) -> Callable[[int, int | None], None]:
+    state = {"last_time": 0.0, "last_percent": -1}
+
+    def report(downloaded: int, total: int | None) -> None:
+        now = time.monotonic()
+        percent = int(downloaded * 100 / total) if total else -1
+        complete = total is not None and downloaded >= total
+        if not complete and now - state["last_time"] < 0.25:
+            return
+        if total and not complete and percent == state["last_percent"]:
+            return
+        state["last_time"] = now
+        state["last_percent"] = percent
+        downloaded_mb = downloaded / 1_048_576
+        if total:
+            typer.echo(
+                f"{label}: {downloaded_mb:.1f}/{total / 1_048_576:.1f} MB ({percent}%)",
+                err=True,
+            )
+        else:
+            typer.echo(f"{label}: {downloaded_mb:.1f} MB", err=True)
+
+    return report
+
+
+@app.callback()
 def main(
     ctx: typer.Context,
-    root: Optional[Path] = typer.Option(None, "--root", "-r", help="Root directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Print INFO logs to stderr"),
-    version: bool = typer.Option(False, "--version", help="Show version"),
+    root: Optional[Path] = typer.Option(None, "--root", "-r", help="Launcher ROOT"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    version: bool = typer.Option(False, "--version", help="Show version and exit"),
 ) -> None:
-    ctx.obj = {"root": root, "verbose": verbose}
-    # Try to resolve root for the file log handler; non-fatal if it fails
-    # (e.g. `dolctl init` runs before a root exists).
-    try:
-        resolved = resolve_root(root)
-    except DolCtlError:
-        resolved = None
-    setup_logging(resolved, verbose=verbose)
+    logger = logging.getLogger("dolctl")
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+    ctx.obj = CliState(root=root, verbose=verbose)
     if version:
         typer.echo(__version__)
         raise typer.Exit()
@@ -145,520 +133,419 @@ def main(
 
 @app.command()
 @with_errors
-def init(directory: Path = typer.Argument(..., help="Directory to initialize")) -> None:
-    init_root(directory)
-    typer.echo(f"Initialized root at {directory}")
+def init(directory: Path) -> None:
+    launcher = Launcher.initialise(directory)
+    launcher.configure_logging()
+    typer.echo(f"Initialised launcher root: {launcher.root}")
 
 
 @app.command()
 @with_errors
 def where(ctx: typer.Context) -> None:
-    root = _get_root(ctx)
-    typer.echo(str(root))
+    typer.echo(_launcher(ctx).root)
 
 
 @app.command()
 @with_errors
 def tui(ctx: typer.Context) -> None:
-    """Launch the interactive TUI front-end."""
-    root = _get_root(ctx)
+    launcher = _launcher(ctx)
     from dolctl.tui.app import DolctlApp
 
-    DolctlApp(root).run()
+    DolctlApp(launcher).run()
 
 
 @app.command()
 @with_errors
 def doctor(ctx: typer.Context) -> None:
-    root = _get_root(ctx)
-    missing: list[str] = []
-    for rel in [".dolctl", "versions", "mods", "profiles", "runtime"]:
-        if not (root / rel).exists():
-            missing.append(rel)
-    if missing:
-        typer.echo("Missing directories:")
-        for rel in missing:
-            typer.echo(f"- {rel}")
-        raise typer.Exit(code=1)
-    config = load_config(root)
-    state = load_state(root)
-    warnings: list[str] = []
-    if state.active_profile and not (root / "profiles" / state.active_profile).is_dir():
-        warnings.append(
-            f"Active profile '{state.active_profile}' does not exist on disk."
+    report = _launcher(ctx).doctor()
+    for check in report.checks:
+        typer.echo(f"{'OK' if check.ok else 'FAIL'}\t{check.message}")
+    if not report.ok:
+        raise typer.Exit(1)
+
+
+@instance_app.command("list")
+@with_errors
+def instance_list(ctx: typer.Context) -> None:
+    launcher = _launcher(ctx)
+    active = launcher.active_instance()
+    for profile in launcher.instances():
+        marker = "*" if profile.name == active else " "
+        typer.echo(
+            f"{marker} {profile.name}\t{profile.version_id or '-'}\t"
+            f"{len(profile.mod_order)} mods"
         )
-    if not config.channels:
-        warnings.append(
-            "No channels configured. Edit .dolctl/config.toml to add channels."
+
+
+@instance_app.command("create")
+@with_errors
+def instance_create(
+    ctx: typer.Context,
+    name: str,
+    version: Optional[str] = typer.Option(None, "--version"),
+    select: bool = typer.Option(False, "--select"),
+) -> None:
+    launcher = _launcher(ctx)
+    profile = launcher.create_instance(name, version_id=version)
+    if select:
+        launcher.select_instance(name)
+    typer.echo(f"Created instance: {profile.name}")
+
+
+@instance_app.command("select")
+@with_errors
+def instance_select(ctx: typer.Context, name: str) -> None:
+    _launcher(ctx).select_instance(name)
+    typer.echo(f"Selected instance: {name}")
+
+
+@instance_app.command("show")
+@with_errors
+def instance_show(
+    ctx: typer.Context,
+    name: Optional[str] = typer.Argument(None),
+) -> None:
+    profile = _launcher(ctx).instance(name)
+    typer.echo(f"name:         {profile.name}")
+    typer.echo(f"version:      {profile.version_id or '-'}")
+    typer.echo(
+        f"port:         {profile.port if profile.port is not None else 'default'}"
+    )
+    browser = profile.open_browser
+    typer.echo(f"open_browser: {browser if browser is not None else 'default'}")
+    typer.echo("mods:")
+    for index, mod_id in enumerate(profile.mod_order, 1):
+        typer.echo(f"  {index}. {mod_id}")
+
+
+@instance_app.command("configure")
+@with_errors
+def instance_configure(
+    ctx: typer.Context,
+    name: Optional[str] = typer.Argument(None),
+    version: Optional[str] = typer.Option(None, "--version"),
+    clear_version: bool = typer.Option(False, "--clear-version"),
+    port: Optional[int] = typer.Option(None, "--port"),
+    clear_port: bool = typer.Option(False, "--clear-port"),
+    browser: Optional[bool] = typer.Option(None, "--browser/--no-browser"),
+    default_browser: bool = typer.Option(False, "--default-browser"),
+) -> None:
+    if version is not None and clear_version:
+        raise typer.BadParameter("Use either --version or --clear-version")
+    if port is not None and clear_port:
+        raise typer.BadParameter("Use either --port or --clear-port")
+    if browser is not None and default_browser:
+        raise typer.BadParameter(
+            "Use either --browser/--no-browser or --default-browser"
         )
-    for w in warnings:
-        typer.echo(w)
-    typer.echo("OK")
+    launcher = _launcher(ctx)
+    instance = launcher.active_instance(name)
+    fields: dict[str, object] = {}
+    if version is not None or clear_version:
+        fields["version_id"] = None if clear_version else version
+    if port is not None or clear_port:
+        fields["port"] = None if clear_port else port
+    if browser is not None or default_browser:
+        fields["open_browser"] = None if default_browser else browser
+    if not fields:
+        raise typer.BadParameter("No configuration change was supplied")
+    profile = launcher.configure_instance(instance, **fields)
+    typer.echo(f"Updated instance: {profile.name}")
+
+
+@instance_app.command("delete")
+@with_errors
+def instance_delete(ctx: typer.Context, name: str) -> None:
+    _launcher(ctx).delete_instance(name)
+    typer.echo(f"Deleted instance: {name}")
+
+
+@instance_mod_app.command("list")
+@with_errors
+def instance_mod_list(ctx: typer.Context, instance: Optional[str] = None) -> None:
+    profile = _launcher(ctx).instance(instance)
+    for index, mod_id in enumerate(profile.mod_order, 1):
+        typer.echo(f"{index}. {mod_id}")
+
+
+@instance_mod_app.command("add")
+@with_errors
+def instance_mod_add(
+    ctx: typer.Context, mod_id: str, instance: Optional[str] = None
+) -> None:
+    launcher = _launcher(ctx)
+    name = launcher.active_instance(instance)
+    launcher.enable_mod(name, mod_id)
+    typer.echo(f"Enabled {mod_id} in {name}")
+
+
+@instance_mod_app.command("remove")
+@with_errors
+def instance_mod_remove(
+    ctx: typer.Context, mod_id: str, instance: Optional[str] = None
+) -> None:
+    launcher = _launcher(ctx)
+    name = launcher.active_instance(instance)
+    launcher.disable_mod(name, mod_id)
+    typer.echo(f"Disabled {mod_id} in {name}")
+
+
+@instance_mod_app.command("reorder")
+@with_errors
+def instance_mod_reorder(
+    ctx: typer.Context,
+    mod_ids: list[str],
+    instance: Optional[str] = None,
+) -> None:
+    launcher = _launcher(ctx)
+    name = launcher.active_instance(instance)
+    launcher.reorder_instance_mods(name, mod_ids)
+    typer.echo(f"Updated mod order in {name}")
 
 
 @version_app.command("list")
 @with_errors
 def version_list(ctx: typer.Context) -> None:
-    root = _get_root(ctx)
-    versions = list_installed(root)
-    if not versions:
-        typer.echo("No versions installed")
-        return
-    for version in versions:
-        typer.echo(f"{version.id}\t{version.channel}\t{version.installed_at}")
+    for version in _launcher(ctx).versions():
+        typer.echo(
+            f"{version.id}\t{version.channel}\t{version.display_name}\t"
+            f"{version.installed_at}"
+        )
+
+
+@version_app.command("remote")
+@with_errors
+def version_remote(
+    ctx: typer.Context,
+    channel: Optional[str] = typer.Option(None, "--channel"),
+    refresh: bool = typer.Option(False, "--refresh"),
+) -> None:
+    launcher = _launcher(ctx)
+    names = [channel] if channel else [name for name, _config in launcher.channels()]
+    for name in names:
+        typer.echo(f"[{name}]")
+        for version in launcher.remote_versions(name, refresh=refresh):
+            typer.echo(f"{version.id}\t{version.published_at}\t{version.asset_name}")
+
+
+def _install_version(
+    launcher: Launcher,
+    selector: str | None,
+    channel: str | None,
+    file: Path | None,
+    source_dir: Path | None,
+    version_id: str | None,
+    force: bool,
+) -> str:
+    selected = sum(value is not None for value in (file, source_dir))
+    if selected > 1:
+        raise typer.BadParameter("Use only one of --file or --dir")
+    if selected and selector is not None:
+        raise typer.BadParameter(
+            "A remote selector cannot be combined with --file/--dir"
+        )
+    if not selected and version_id is not None:
+        raise typer.BadParameter("--as is only available for local imports")
+    if file is not None:
+        return launcher.install_version_file(
+            file,
+            version_id=version_id,
+            channel=channel or "local",
+            force=force,
+        )
+    if source_dir is not None:
+        return launcher.install_version_directory(
+            source_dir,
+            version_id=version_id,
+            channel=channel or "local",
+            force=force,
+        )
+    return launcher.install_remote_version(
+        channel or "modloader",
+        selector or "latest",
+        force=force,
+        progress=_progress("download"),
+    )
+
+
+@version_app.command("install")
+@with_errors
+def version_install(
+    ctx: typer.Context,
+    selector: Optional[str] = typer.Argument(None),
+    channel: Optional[str] = typer.Option(None, "--channel"),
+    file: Optional[Path] = typer.Option(None, "--file"),
+    source_dir: Optional[Path] = typer.Option(None, "--dir"),
+    version_id: Optional[str] = typer.Option(None, "--as"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    installed = _install_version(
+        _launcher(ctx), selector, channel, file, source_dir, version_id, force
+    )
+    typer.echo(f"Installed version: {installed}")
 
 
 @version_app.command("remove")
 @with_errors
 def version_remove(
     ctx: typer.Context,
-    version_id: str = typer.Argument(..., help="Installed version id"),
-) -> None:
-    root = _get_root(ctx)
-    affected = remove_version(root, version_id)
-    typer.echo(f"Removed version: {version_id}")
-    if affected:
-        typer.echo(
-            "Warning: the following profiles still reference this version "
-            "and will fail to build until updated:"
-        )
-        for name in affected:
-            typer.echo(f"- {name}")
-
-
-@version_remote_app.command("list")
-@with_errors
-def version_remote_list(
-    ctx: typer.Context,
-    channel: Optional[str] = typer.Option(None, "--channel"),
-    refresh: bool = typer.Option(False, "--refresh"),
-) -> None:
-    root = _get_root(ctx)
-    config = load_config(root)
-    channels = [channel] if channel else list(config.channels.keys())
-    if not channels:
-        raise DolCtlError("No channels configured")
-    for name in channels:
-        typer.echo(f"Channel: {name}")
-        versions = list_remote_versions(root, name, refresh=refresh)
-        if not versions:
-            typer.echo("  (none)")
-            continue
-        for version in versions:
-            typer.echo(f"  {version.id}\t{version.published_at}\t{version.asset_name}")
-
-
-@app.command()
-@with_errors
-def install(
-    ctx: typer.Context,
-    selector: Optional[str] = typer.Argument(
-        None, help="Version selector (e.g., latest, 0.5.3)"
-    ),
-    channel: str = typer.Option("vanilla", "--channel"),
-    file: Optional[Path] = typer.Option(None, "--file", help="Install from zip"),
-    source_dir: Optional[Path] = typer.Option(
-        None, "--dir", help="Install from directory"
-    ),
-    version_id: Optional[str] = typer.Option(None, "--as", help="Override version id"),
+    version_id: str,
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    root = _get_root(ctx)
-    if file:
-        installed = install_from_file(root, file, version_id, channel, force=force)
-    elif source_dir:
-        installed = install_from_dir(root, source_dir, version_id, channel, force=force)
-    else:
-        if not selector:
-            raise DolCtlError("Selector required for remote install")
-        installed = install_from_remote(root, channel, selector, force=force)
-    typer.echo(f"Installed: {installed}")
-
-
-@app.command("use")
-@with_errors
-def use_version(
-    ctx: typer.Context,
-    version_id: str = typer.Argument(..., help="Installed version id"),
-    profile: Optional[str] = typer.Option(None, "--profile"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    set_profile_version(root, profile_name, version_id)
-    typer.echo(f"Profile {profile_name} now uses {version_id}")
-
-
-@profile_app.command("list")
-@with_errors
-def profile_list(ctx: typer.Context) -> None:
-    root = _get_root(ctx)
-    profiles = list_profiles(root)
-    if not profiles:
-        typer.echo("No profiles")
-        return
-    for name in profiles:
-        typer.echo(name)
-
-
-@profile_app.command("create")
-@with_errors
-def profile_create(ctx: typer.Context, name: str = typer.Argument(...)) -> None:
-    root = _get_root(ctx)
-    create_profile(root, name)
-    typer.echo(f"Created profile: {name}")
-
-
-@profile_app.command("use")
-@with_errors
-def profile_use(ctx: typer.Context, name: str = typer.Argument(...)) -> None:
-    root = _get_root(ctx)
-    set_active_profile(root, name)
-    typer.echo(f"Active profile: {name}")
-
-
-@profile_app.command("set-version")
-@with_errors
-def profile_set_version(
-    ctx: typer.Context,
-    version_id: str = typer.Argument(...),
-    profile: Optional[str] = typer.Option(None, "--profile"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    set_profile_version(root, profile_name, version_id)
-    typer.echo(f"Profile {profile_name} now uses {version_id}")
-
-
-# ---------------------------------------------------------------------------
-# mod commands:  dolctl mod list / add / remove / info
-# ---------------------------------------------------------------------------
+    result = _launcher(ctx).remove_version(version_id, force=force)
+    typer.echo(f"Removed version: {version_id}")
+    if result.affected_profiles:
+        typer.echo("Detached instances: " + ", ".join(result.affected_profiles))
 
 
 @mod_app.command("list")
 @with_errors
 def mod_list(ctx: typer.Context) -> None:
-    root = _get_root(ctx)
-    mods = list_mods(root)
-    if not mods:
-        typer.echo("No mods installed")
-        return
-    for m in mods:
-        typer.echo(f"{m.id}\t{m.name}\t{m.version}")
+    for mod in _launcher(ctx).mods():
+        typer.echo(f"{mod.id}\t{mod.name}\t{mod.version}\t{mod.author}")
 
 
 @mod_app.command("add")
 @with_errors
 def mod_add(
     ctx: typer.Context,
-    path_or_url: str = typer.Argument(..., help="Path to .mod.zip or a URL"),
-    mod_id: Optional[str] = typer.Option(None, "--id", help="Override mod id"),
-    force: bool = typer.Option(False, "--force", help="Overwrite if mod id already exists"),
+    source: str,
+    mod_id: Optional[str] = typer.Option(None, "--id"),
+    force: bool = typer.Option(False, "--force"),
 ) -> None:
-    root = _get_root(ctx)
-    installed_id = add_mod_from_zip(root, path_or_url, mod_id, force=force)
-    typer.echo(f"Installed mod: {installed_id}")
-
-
-@mod_app.command("remove")
-@with_errors
-def mod_remove(
-    ctx: typer.Context,
-    mod_id: str = typer.Argument(...),
-) -> None:
-    root = _get_root(ctx)
-    remove_mod(root, mod_id)
-    typer.echo(f"Removed mod: {mod_id}")
+    installed = _launcher(ctx).install_mod(
+        source,
+        mod_id=mod_id,
+        force=force,
+        progress=_progress("download"),
+    )
+    typer.echo(f"Installed mod: {installed}")
 
 
 @mod_app.command("info")
 @with_errors
-def mod_info(
-    ctx: typer.Context,
-    mod_id: str = typer.Argument(...),
-) -> None:
-    root = _get_root(ctx)
-    m = get_mod_info(root, mod_id)
-    typer.echo(f"id:          {m.id}")
-    typer.echo(f"name:        {m.name}")
-    typer.echo(f"version:     {m.version}")
-    typer.echo(f"author:      {m.author}")
-    typer.echo(f"description: {m.description}")
-    typer.echo(f"source:      {m.source}")
-    typer.echo(f"source_ref:  {m.source_ref}")
-    typer.echo(f"installed:   {m.installed_at}")
+def mod_info(ctx: typer.Context, mod_id: str) -> None:
+    mod = _launcher(ctx).mod(mod_id)
+    typer.echo(f"id:          {mod.id}")
+    typer.echo(f"name:        {mod.name}")
+    typer.echo(f"version:     {mod.version}")
+    typer.echo(f"author:      {mod.author}")
+    typer.echo(f"description: {mod.description}")
+    typer.echo(f"source:      {mod.source_ref}")
 
 
-# ---------------------------------------------------------------------------
-# profile mod commands:  dolctl profile mod add / remove / list
-# ---------------------------------------------------------------------------
-
-
-@profile_mod_app.command("add")
+@mod_app.command("remove")
 @with_errors
-def profile_mod_add(
-    ctx: typer.Context,
-    mod_id: str = typer.Argument(...),
-    profile: Optional[str] = typer.Option(None, "--profile"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    add_mod_to_profile(root, profile_name, mod_id)
-    typer.echo(f"Added {mod_id} to profile {profile_name}")
-
-
-@profile_mod_app.command("remove")
-@with_errors
-def profile_mod_remove(
-    ctx: typer.Context,
-    mod_id: str = typer.Argument(...),
-    profile: Optional[str] = typer.Option(None, "--profile"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    remove_mod_from_profile(root, profile_name, mod_id)
-    typer.echo(f"Removed {mod_id} from profile {profile_name}")
-
-
-@profile_mod_app.command("reorder")
-@with_errors
-def profile_mod_reorder(
-    ctx: typer.Context,
-    mod_ids: list[str] = typer.Argument(
-        ..., help="All mod ids in the desired load order"
-    ),
-    profile: Optional[str] = typer.Option(None, "--profile"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    reorder_mods(root, profile_name, mod_ids)
-    typer.echo(f"Reordered mods in profile {profile_name}")
-
-
-@profile_mod_app.command("list")
-@with_errors
-def profile_mod_list(
-    ctx: typer.Context,
-    profile: Optional[str] = typer.Option(None, "--profile"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    p = get_profile(root, profile_name)
-    if not p.mod_order:
-        typer.echo("No mods in profile")
-        return
-    for i, mod_id in enumerate(p.mod_order, 1):
-        typer.echo(f"{i}. {mod_id}")
-
-
-# ---------------------------------------------------------------------------
-# build / run / serve
-# ---------------------------------------------------------------------------
-
-
-@app.command()
-@with_errors
-def build(
-    ctx: typer.Context,
-    profile: Optional[str] = typer.Option(None, "--profile"),
-    clean: bool = typer.Option(False, "--clean", help="Force a full rebuild"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    result = build_runtime(root, profile_name, clean=clean)
-    typer.echo(f"Built runtime for {profile_name} at {result.output_dir}")
-
-
-@app.command()
-@with_errors
-def run(
-    ctx: typer.Context,
-    profile: Optional[str] = typer.Option(None, "--profile"),
-    port: Optional[int] = typer.Option(None, "--port"),
-    no_browser: bool = typer.Option(False, "--no-browser"),
-    allow_lan: bool = typer.Option(
-        False, "--allow-lan", help="Allow LAN access (bind 0.0.0.0)"
-    ),
-    clean: bool = typer.Option(False, "--clean", help="Force a full rebuild"),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    open_browser_override = False if no_browser else None
-    result = prepare_run(
-        root,
-        profile_name,
-        port,
-        open_browser_override,
-        allow_lan=allow_lan,
-        clean=clean,
-    )
-    typer.echo(f"Serving {result.url}")
-    if result.open_browser:
-        open_browser(result.url, enabled=True)
-    try:
-        result.server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        result.server.server_close()
-
-
-@app.command()
-@with_errors
-def serve(
-    ctx: typer.Context,
-    profile: Optional[str] = typer.Option(None, "--profile"),
-    port: Optional[int] = typer.Option(None, "--port"),
-    allow_lan: bool = typer.Option(
-        False, "--allow-lan", help="Allow LAN access (bind 0.0.0.0)"
-    ),
-) -> None:
-    root = _get_root(ctx)
-    profile_name = _resolve_profile_name(root, profile)
-    profile_data = get_profile(root, profile_name)
-    config = load_config(root)
-    if port is not None:
-        port_choice = port
-        allow_fallback = False
-    elif profile_data.port is not None:
-        port_choice = profile_data.port
-        allow_fallback = True
-    else:
-        port_choice = config.default_port
-        allow_fallback = True
-    merged_dir = root / "runtime" / profile_name / "merged"
-    if not merged_dir.exists():
-        raise DolCtlError(f"Runtime not built for profile: {profile_name}")
-    # Resolve entry HTML name from version manifest
-    from infra.toml import read_toml
-    from core.models import version_manifest_from_dict
-
-    entry_name = "index.html"
-    if profile_data.version_id:
-        manifest_path = root / "versions" / profile_data.version_id / ".manifest.toml"
-        if manifest_path.exists():
-            vm = version_manifest_from_dict(read_toml(manifest_path))
-            entry_name = vm.entry
-    host = "0.0.0.0" if allow_lan else "127.0.0.1"
-    server, actual_port = create_server(
-        merged_dir,
-        host=host,
-        port=port_choice,
-        allow_fallback=allow_fallback,
-        entry_name=entry_name,
-        allow_lan=allow_lan,
-    )
-    url = f"http://127.0.0.1:{actual_port}/"
-    typer.echo(f"Serving {url}")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
-
-
-app.add_typer(version_app, name="version")
-version_app.add_typer(version_remote_app, name="remote")
-app.add_typer(profile_app, name="profile")
-profile_app.add_typer(profile_mod_app, name="mod")
-app.add_typer(mod_app, name="mod")
-app.add_typer(channel_app, name="channel")
-channel_app.add_typer(channel_preset_app, name="preset")
-
-
-# ---------------------------------------------------------------------------
-# channel commands
-# ---------------------------------------------------------------------------
+def mod_remove(ctx: typer.Context, mod_id: str) -> None:
+    result = _launcher(ctx).remove_mod(mod_id)
+    typer.echo(f"Removed mod: {mod_id}")
+    if result.affected_profiles:
+        typer.echo("Updated instances: " + ", ".join(result.affected_profiles))
 
 
 @channel_app.command("list")
 @with_errors
 def channel_list(ctx: typer.Context) -> None:
-    root = _get_root(ctx)
-    entries = list_channels(root)
-    if not entries:
-        typer.echo("No channels configured. Try: dolctl channel add <name> --preset dol-vanilla")
-        return
-    for name, cfg in entries:
-        typer.echo(f"{name}\t{cfg.provider}\t{cfg.repo}\t{cfg.asset_regex}")
+    for name, channel in _launcher(ctx).channels():
+        typer.echo(f"{name}\t{channel.provider}\t{channel.repo}\t{channel.asset_regex}")
 
 
-@channel_app.command("show")
+@channel_app.command("preset")
 @with_errors
-def channel_show(ctx: typer.Context, name: str = typer.Argument(...)) -> None:
-    root = _get_root(ctx)
-    cfg = get_channel(root, name)
-    typer.echo(f"name:        {name}")
-    typer.echo(f"provider:    {cfg.provider}")
-    typer.echo(f"repo:        {cfg.repo}")
-    typer.echo(f"asset_regex: {cfg.asset_regex}")
-    if cfg.extra:
-        typer.echo("extra:")
-        for k, v in cfg.extra.items():
-            typer.echo(f"  {k} = {v}")
+def channel_preset() -> None:
+    for name, preset in Launcher.channel_presets():
+        typer.echo(f"{name}\t{preset.repo}\t{preset.description}")
 
 
 @channel_app.command("add")
 @with_errors
 def channel_add(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Channel name (e.g., vanilla)"),
-    preset: Optional[str] = typer.Option(
-        None, "--preset", help="Use a built-in preset (run `channel preset list`)"
-    ),
-    provider: Optional[str] = typer.Option(None, "--provider"),
-    repo: Optional[str] = typer.Option(None, "--repo", help="e.g. owner/name"),
+    name: str,
+    preset: Optional[str] = typer.Option(None, "--preset"),
+    repo: Optional[str] = typer.Option(None, "--repo"),
     asset_regex: Optional[str] = typer.Option(None, "--asset-regex"),
     force: bool = typer.Option(False, "--force"),
 ) -> None:
-    root = _get_root(ctx)
-    cfg = add_channel(
-        root,
+    channel = _launcher(ctx).add_channel(
         name,
         preset=preset,
-        provider=provider,
         repo=repo,
         asset_regex=asset_regex,
         force=force,
     )
-    typer.echo(f"Added channel {name} ({cfg.provider}: {cfg.repo})")
+    typer.echo(f"Added source: {name} ({channel.repo})")
 
 
 @channel_app.command("remove")
 @with_errors
-def channel_remove(ctx: typer.Context, name: str = typer.Argument(...)) -> None:
-    root = _get_root(ctx)
-    remove_channel(root, name)
-    typer.echo(f"Removed channel: {name}")
+def channel_remove(ctx: typer.Context, name: str) -> None:
+    _launcher(ctx).remove_channel(name)
+    typer.echo(f"Removed source: {name}")
 
 
-@channel_app.command("set")
+@app.command()
 @with_errors
-def channel_set(
+def build(
     ctx: typer.Context,
-    name: str = typer.Argument(...),
-    provider: Optional[str] = typer.Option(None, "--provider"),
-    repo: Optional[str] = typer.Option(None, "--repo"),
-    asset_regex: Optional[str] = typer.Option(None, "--asset-regex"),
+    instance: Optional[str] = typer.Argument(None),
+    clean: bool = typer.Option(False, "--clean"),
 ) -> None:
-    root = _get_root(ctx)
-    set_channel_fields(
-        root,
-        name,
-        provider=provider,
-        repo=repo,
-        asset_regex=asset_regex,
-    )
-    typer.echo(f"Updated channel: {name}")
+    result = _launcher(ctx).build(instance, clean=clean)
+    typer.echo(f"{result.status}: {result.profile} -> {result.output_dir}")
 
 
-@channel_preset_app.command("list")
+@app.command()
 @with_errors
-def channel_preset_list() -> None:
-    if not PRESETS:
-        typer.echo("(no presets bundled)")
-        return
-    for key, preset in sorted(PRESETS.items()):
-        typer.echo(f"{key}\t{preset.provider}\t{preset.repo}")
-        if preset.description:
-            typer.echo(f"    {preset.description}")
+def run(
+    ctx: typer.Context,
+    instance: Optional[str] = typer.Argument(None),
+    port: Optional[int] = typer.Option(None, "--port"),
+    no_browser: bool = typer.Option(False, "--no-browser"),
+    allow_lan: bool = typer.Option(False, "--allow-lan"),
+    clean: bool = typer.Option(False, "--clean"),
+) -> None:
+    session = _launcher(ctx).prepare_run(
+        instance,
+        port=port,
+        open_browser=False if no_browser else None,
+        allow_lan=allow_lan,
+        clean=clean,
+    )
+    typer.echo(f"Serving {session.url}")
+    session.open_browser()
+    try:
+        session.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        session.close()
+
+
+@app.command()
+@with_errors
+def serve(
+    ctx: typer.Context,
+    instance: Optional[str] = typer.Argument(None),
+    port: Optional[int] = typer.Option(None, "--port"),
+    allow_lan: bool = typer.Option(False, "--allow-lan"),
+) -> None:
+    session = _launcher(ctx).prepare_serve(
+        instance,
+        port=port,
+        allow_lan=allow_lan,
+    )
+    typer.echo(f"Serving {session.url}")
+    try:
+        session.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        session.close()
+
+
+app.add_typer(instance_app, name="instance")
+instance_app.add_typer(instance_mod_app, name="mod")
+app.add_typer(version_app, name="version")
+app.add_typer(mod_app, name="mod")
+app.add_typer(channel_app, name="channel")
